@@ -6,17 +6,17 @@
   // Ablauf einer Förderung. auto = wird aus den Daten abgeleitet.
   // ---------------------------------------------------------------
   const SCHRITTE = [
-    { key: 'daten',             label: 'Daten erfasst',              todo: 'Daten erfassen', kurz: 'Daten',            auto: true },
-    { key: 'aufgeteilt',        label: 'Aufgeteilt',                  todo: 'Aufteilen', kurz: 'Aufgeteilt',       auto: true },
-    { key: 'ticket',            label: 'Ticket gezogen',              todo: 'Ticket ziehen', kurz: 'Ticket' },
-    { key: 'projekt',           label: 'Projekt angelegt',            todo: 'Projekt anlegen', kurz: 'Projekt' },
-    { key: 'eingereicht',       label: 'Im Portal eingereicht',       todo: 'Im Portal einreichen', kurz: 'Eingereicht' },
-    { key: 'vertrag_erhalten',  label: 'Fördervertrag erhalten',      todo: 'Vertrag abwarten', kurz: 'Vertrag da' },
-    { key: 'vertrag_versendet', label: 'Vertrag an Kunden versendet', todo: 'Vertrag versenden', kurz: 'Vertrag versendet' },
-    { key: 'rechnung',          label: 'Rechnung hochgeladen',        todo: 'Rechnung hochladen', kurz: 'Rechnung' },
-    { key: 'zahlung',           label: 'Zahlung hochgeladen',         todo: 'Zahlung hochladen', kurz: 'Zahlung' },
-    { key: 'abgeschlossen',     label: 'Abgeschlossen',               todo: 'Abschließen', kurz: 'Abgeschlossen' },
-    { key: 'ausgezahlt',        label: 'Ausgezahlt',                  todo: 'Auszahlung abwarten', kurz: 'Ausgezahlt' }
+    { key: 'daten',             label: 'Daten erfasst',              todo: 'Daten erfassen', knopf: 'Ergänzen', kurz: 'Daten',            auto: true },
+    { key: 'aufgeteilt',        label: 'Aufgeteilt',                  todo: 'Aufteilen', knopf: 'Zuteilen', kurz: 'Aufgeteilt',       auto: true },
+    { key: 'ticket',            label: 'Ticket gezogen',              todo: 'Ticket ziehen', knopf: 'Ticket gezogen', kurz: 'Ticket' },
+    { key: 'projekt',           label: 'Projekt angelegt',            todo: 'Projekt anlegen', knopf: 'Projekt angelegt', kurz: 'Projekt' },
+    { key: 'eingereicht',       label: 'Im Portal eingereicht',       todo: 'Im Portal einreichen', knopf: 'Eingereicht', kurz: 'Eingereicht' },
+    { key: 'vertrag_erhalten',  label: 'Fördervertrag erhalten',      todo: 'Vertrag abwarten', knopf: 'Vertrag erhalten', warten: 'Warten auf Fördervertrag', kurz: 'Vertrag da' },
+    { key: 'vertrag_versendet', label: 'Vertrag an Kunden versendet', todo: 'Vertrag versenden', knopf: 'Versendet', kurz: 'Vertrag versendet' },
+    { key: 'rechnung',          label: 'Rechnung hochgeladen',        todo: 'Rechnung hochladen', knopf: 'Hochgeladen', kurz: 'Rechnung' },
+    { key: 'zahlung',           label: 'Zahlung hochgeladen',         todo: 'Zahlung hochladen', knopf: 'Hochgeladen', kurz: 'Zahlung' },
+    { key: 'abgeschlossen',     label: 'Abgeschlossen',               todo: 'Abschließen', knopf: 'Abgeschlossen', kurz: 'Abgeschlossen' },
+    { key: 'ausgezahlt',        label: 'Ausgezahlt',                  todo: 'Auszahlung abwarten', knopf: 'Ausgezahlt', warten: 'Warten auf Auszahlung', kurz: 'Ausgezahlt' }
   ];
 
   // Was vor dem Ticket-Ziehen vorhanden sein muss

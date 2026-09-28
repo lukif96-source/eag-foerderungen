@@ -56,7 +56,8 @@
     ich: null, daten: [],
     filter: Object.assign({ suche: '', jahr: String(new Date().getFullYear()), call: '', art: '', mitarbeiter: '', zieher: '', papierkorb: false, schritt: '' }, speicherLokal.lesen('filter', {})),
     sort: speicherLokal.lesen('sort', { k: 'call', auf: true }),
-    detail: null, geladenUm: 0
+    detail: null, geladenUm: 0,
+    ansicht: speicherLokal.lesen('ansicht', 'todo'), aufgeklappt: new Set()
   };
   S.filter.suche = '';
   S.filter.papierkorb = false;
@@ -214,15 +215,6 @@
     }
     return true;
   }
-  function passtSchritt(d, st) {
-    const f = S.filter.schritt;
-    if (!f) return true;
-    if (f === 'offen') return !!(d.offene_punkte || '').trim();
-    if (f === 'datenfehlen') return E.fehlendeDaten(d).length > 0 && st.hoechster < 2;
-    if (f === 'fertig') return st.fertig;
-    return st.naechster >= 0 && SCHRITTE[st.naechster].key === f;
-  }
-
   function sortiere(liste) {
     const { k, auf } = S.sort;
     const wert = x => {
@@ -244,45 +236,102 @@
     });
   }
 
+  // Ansicht: "todo" = wir sind dran, "warten" = Förderstelle/Kunde ist dran, "fertig", "alle"
+  function kategorie(st) {
+    if (st.fertig) return 'fertig';
+    return SCHRITTE[st.naechster].warten ? 'warten' : 'todo';
+  }
+
+  function aktuelleListe() {
+    return S.daten.filter(passtBasis).map(d => ({ d, st: E.status(d) }))
+      .filter(x => S.ansicht === 'alle' || kategorie(x.st) === S.ansicht);
+  }
+
   // ---------------------------------------------------------------
   // Übersicht zeichnen
   // ---------------------------------------------------------------
   function zeichne() {
     const basis = S.daten.filter(passtBasis).map(d => ({ d, st: E.status(d) }));
-    zeichnePipeline(basis);
-    const liste = sortiere(basis.filter(x => passtSchritt(x.d, x.st)));
-    zeichneListe(liste, basis.length);
+    zeichneReiter(basis);
+    const liste = basis.filter(x => S.ansicht === 'alle' || kategorie(x.st) === S.ansicht);
+    if (S.ansicht === 'alle') zeichneListe(sortiere(liste), basis.length);
+    else zeichneGruppen(liste);
     const f = S.filter;
-    $('#filter-zurueck').hidden = !(f.suche || f.call || f.art || f.mitarbeiter || f.zieher || f.schritt || f.papierkorb);
-    speicherLokal.schreiben('filter', { jahr: f.jahr, call: f.call, art: f.art, mitarbeiter: f.mitarbeiter, zieher: f.zieher, schritt: f.schritt });
+    const aktiv = [f.call, f.art, f.mitarbeiter, f.zieher, f.papierkorb].filter(Boolean).length;
+    $('#filter-zurueck').hidden = !(f.suche || aktiv);
+    $('#mehr-filter-btn').classList.toggle('aktiv', !!aktiv);
+    $('#mehr-filter-btn span').textContent = aktiv ? `Filter (${aktiv})` : 'Filter';
+    speicherLokal.schreiben('filter', { jahr: f.jahr, call: f.call, art: f.art, mitarbeiter: f.mitarbeiter, zieher: f.zieher });
+    speicherLokal.schreiben('ansicht', S.ansicht);
   }
 
-  function zeichnePipeline(basis) {
-    const aktiv = S.filter.schritt;
-    const zaehl = {};
-    let fertig = 0, offen = 0, datenFehlen = 0;
-    basis.forEach(({ d, st }) => {
-      if (st.fertig) fertig++;
-      else zaehl[SCHRITTE[st.naechster].key] = (zaehl[SCHRITTE[st.naechster].key] || 0) + 1;
-      if ((d.offene_punkte || '').trim()) offen++;
-      if (E.fehlendeDaten(d).length && st.hoechster < 2) datenFehlen++;
-    });
-    const karte = (key, titel, n, klasse, sub) => `
-      <button class="stufe ${klasse || ''} ${aktiv === key ? 'aktiv' : ''} ${n ? '' : 'leer'}" data-schritt="${key}" title="${esc(sub || titel)}">
-        <span class="stufe-zahl">${n}</span><span class="stufe-titel">${esc(titel)}</span>${sub ? `<span class="stufe-sub">${esc(sub)}</span>` : ''}
-      </button>`;
-    const schritte = SCHRITTE.map((s, i) => karte(s.key, s.todo, zaehl[s.key] || 0, 'stufe-' + (i < 2 ? 'vor' : i < 7 ? 'antrag' : 'abrechnung'),
-      'Als Nächstes: ' + s.label)).join('');
-    $('#pipeline').innerHTML = `
-      <div class="pipeline-kopf">
-        <h1>Was ist zu tun?</h1>
-        <div class="pipeline-legende"><span class="lg lg-vor">Vorbereitung</span><span class="lg lg-antrag">Antrag &amp; Vertrag</span><span class="lg lg-abrechnung">Abrechnung</span></div>
+  function zeichneReiter(basis) {
+    const n = { todo: 0, warten: 0, fertig: 0, alle: basis.length };
+    basis.forEach(x => { n[kategorie(x.st)]++; });
+    const r = (k, titel, sub) => `<button class="reiter-knopf ${S.ansicht === k ? 'aktiv' : ''}" data-ansicht="${k}">
+      <b>${n[k]}</b><span>${titel}</span><small>${sub}</small></button>`;
+    $('#reiter').innerHTML = r('todo', 'Zu tun', 'wir sind dran') + r('warten', 'Warten', 'Förderstelle ist dran') +
+      r('fertig', 'Fertig', 'ausgezahlt') + r('alle', 'Alle', 'komplette Liste');
+  }
+
+  function zeileHtml(d, st, bearbeiten) {
+    const n = st.naechster >= 0 ? SCHRITTE[st.naechster] : null;
+    const fehlt = E.fehlendeDaten(d);
+    const info = [[d.plz, d.ort].filter(Boolean).join(' '), d.foerdercall ? 'Call ' + datumDE(d.foerdercall) : '',
+      d.zieher ? 'Ticket: ' + d.zieher : '', d.mitarbeiter ? 'Verkauf: ' + d.mitarbeiter : ''].filter(Boolean);
+    let knopf = '';
+    if (!n) {
+      const w = (d.schritte || {}).ausgezahlt;
+      knopf = `<span class="zeile-fertig"><svg><use href="#i-check"/></svg>${w && w !== '✓' ? 'Ausgezahlt ' + datumDE(w) : 'Ausgezahlt'}</span>`;
+    } else if (bearbeiten) {
+      knopf = n.auto
+        ? `<button class="erledigt erledigt-leise" data-oeffnen>${esc(n.knopf)}</button>`
+        : `<button class="erledigt" data-schnell="${n.key}" title="${esc(n.label)} – heute erledigt"><svg><use href="#i-check"/></svg>${esc(n.knopf)}</button>`;
+    }
+    return `<div class="zeile" data-id="${d.id}" tabindex="0">
+      <div class="wer">
+        <div class="name">${esc(d.kunde || '(ohne Namen)')}</div>
+        <div class="info">${esc(info.join(' · '))}</div>
+        ${(d.offene_punkte || '').trim() ? `<div class="hinweis"><svg><use href="#i-flag"/></svg>${esc(d.offene_punkte)}</div>` : ''}
+        ${fehlt.length && st.hoechster < 2 ? `<div class="hinweis warn"><svg><use href="#i-alert"/></svg>Es fehlen noch: ${esc(fehlt.join(', '))}</div>` : ''}
       </div>
-      <div class="stufen">${schritte}${karte('fertig', 'Erledigt', fertig, 'stufe-fertig', 'Ausgezahlt – komplett erledigt')}</div>
-      <div class="stufen-extra">
-        ${karte('offen', 'Offene Punkte', offen, 'stufe-warn', 'Einträge mit offenen Punkten')}
-        ${karte('datenfehlen', 'Daten unvollständig', datenFehlen, 'stufe-warn', 'Pflichtangaben fehlen noch (vor dem Ticket)')}
-      </div>`;
+      <div class="zeile-stand">${fortschritt(d, st)}<span>${st.erledigt.filter(Boolean).length} von ${SCHRITTE.length}</span></div>
+      <div class="zeile-knopf">${knopf}</div>
+    </div>`;
+  }
+
+  function zeichneGruppen(liste) {
+    const bearbeiten = darf('bearbeiten') && !S.filter.papierkorb;
+    const gruppen = new Map();
+    liste.forEach(x => {
+      const key = x.st.fertig ? 'fertig' : SCHRITTE[x.st.naechster].key;
+      if (!gruppen.has(key)) gruppen.set(key, []);
+      gruppen.get(key).push(x);
+    });
+    const reihenfolge = SCHRITTE.map(s => s.key).concat(['fertig']);
+    const leerText = { todo: 'Nichts zu tun – alles erledigt.', warten: 'Im Moment wartest du auf nichts.', fertig: 'Noch keine Förderung ausgezahlt.' }[S.ansicht];
+    $('#liste-info').innerHTML = S.filter.papierkorb ? '<b class="rot">Papierkorb</b>' : '';
+    if (!liste.length) {
+      $('#liste').innerHTML = `<div class="leer-hinweis">${S.daten.length ? (S.filter.suche ? 'Kein Kunde gefunden.' : leerText) : (darf('admin') ? 'Noch keine Kunden. Oben auf „Neuer Kunde“ klicken oder die Excel-Liste importieren.' : 'Noch keine Kunden erfasst.')}</div>`;
+      return;
+    }
+    const zeigen = S.filter.suche ? 999 : 6;
+    $('#liste').innerHTML = reihenfolge.filter(k => gruppen.has(k)).map(k => {
+      const eintraege = gruppen.get(k).sort((a, b) => ((a.d.foerdercall || '9999') + a.d.kunde).localeCompare((b.d.foerdercall || '9999') + b.d.kunde, 'de'));
+      const i = SCHRITTE.findIndex(s => s.key === k);
+      const s = SCHRITTE[i];
+      const phase = k === 'fertig' ? 'fertig' : i < 2 ? 'vor' : i < 7 ? 'antrag' : 'abrechnung';
+      const titel = k === 'fertig' ? 'Ausgezahlt' : (s.warten || s.todo);
+      const offen = S.aufgeklappt.has(k) || eintraege.length <= zeigen + 1;
+      const extra = k === 'aufgeteilt' && bearbeiten ? '<button class="btn btn-wuerfel" data-aktion="wuerfeln"><svg><use href="#i-dice"/></svg>Automatisch aufteilen</button>' : '';
+      return `<section class="gruppe g-${phase}">
+        <div class="gruppe-kopf"><span class="gruppe-nr">${k === 'fertig' ? '<svg><use href="#i-check"/></svg>' : i + 1}</span><h2>${esc(titel)}</h2><span class="anz">${eintraege.length}</span>${extra}</div>
+        <div class="gruppe-karte">
+          ${(offen ? eintraege : eintraege.slice(0, zeigen)).map(x => zeileHtml(x.d, x.st, bearbeiten)).join('')}
+          ${offen ? '' : `<button class="mehr" data-mehr="${k}">Alle ${eintraege.length} anzeigen</button>`}
+        </div>
+      </section>`;
+    }).join('');
   }
 
   function fortschritt(d, st) {
@@ -408,6 +457,23 @@
     }).join('')}</ol>`;
   }
 
+  function jetztHtml(rec, nurLesen, neu) {
+    if (neu) return '<div class="jetzt jetzt-neu"><div class="jetzt-text"><small>Neuer Kunde</small><b>Daten eintragen und speichern</b></div></div>';
+    const st = E.status(rec);
+    if (st.fertig) return '<div class="jetzt jetzt-fertig"><div class="jetzt-text"><small>Stand</small><b>Komplett erledigt – ausgezahlt</b></div></div>';
+    const n = SCHRITTE[st.naechster];
+    const hinweis = n.key === 'daten' ? 'Unten die fehlenden Angaben ergänzen: ' + E.fehlendeDaten(rec).join(', ')
+      : n.key === 'aufgeteilt' ? 'Unten bei „Förderung“ den Ticket-Zieher eintragen' : '';
+    return `<div class="jetzt"><div class="jetzt-text"><small>Als Nächstes · Schritt ${st.naechster + 1} von ${SCHRITTE.length}</small><b>${esc(n.warten || n.todo)}</b>${hinweis ? `<span>${esc(hinweis)}</span>` : ''}</div>
+      ${!nurLesen && !n.auto ? `<button class="erledigt erledigt-gross" data-jetzt="${n.key}"><svg><use href="#i-check"/></svg>${esc(n.knopf)} – speichern</button>` : ''}</div>`;
+  }
+
+  function ablaufNeu() {
+    const D = S.detail;
+    $('#d-ablauf').innerHTML = ablaufHtml(D.rec, false);
+    $('#d-jetzt').innerHTML = jetztHtml(D.rec, false, D.neu);
+  }
+
   function zeichneDetail() {
     const { rec, neu } = S.detail;
     const nurLesen = !darf('bearbeiten') || !!rec.geloescht_am;
@@ -416,6 +482,7 @@
       (rec.geaendert_von ? ` <span class="grau">· zuletzt ${esc(rec.geaendert_von)}, ${new Date(rec.geaendert_am).toLocaleString('de-AT', { dateStyle: 'short', timeStyle: 'short' })}</span>` : '') +
       (rec.geloescht_am ? ' · <b class="rot">im Papierkorb</b>' : '');
     $('#d-inhalt').innerHTML = `
+      <div id="d-jetzt">${jetztHtml(rec, nurLesen, neu)}</div>
       <div class="detail-raster">
         <section class="karte karte-ablauf"><h3><svg><use href="#i-bolt"/></svg>Ablauf</h3><div id="d-ablauf">${ablaufHtml(rec, nurLesen)}</div></section>
         <div class="detail-felder">
@@ -476,18 +543,18 @@
       const s = Object.assign({}, rec.schritte);
       if (el.checked) s[key] = heute(); else delete s[key];
       rec.schritte = s;
-      $('#d-ablauf').innerHTML = ablaufHtml(rec, false);
+      ablaufNeu();
     } else if (el.dataset.schrittDatum) {
       if (e.type !== 'change') return;
       const key = el.dataset.schrittDatum;
       const s = Object.assign({}, rec.schritte);
       if (el.value) s[key] = el.value; else delete s[key];
       rec.schritte = s;
-      $('#d-ablauf').innerHTML = ablaufHtml(rec, false);
+      ablaufNeu();
     } else if (el.name) {
       rec[el.name] = formWert(el);
       if (['kunde', 'strasse', 'plz', 'ort', 'zaehlpunkt', 'mail', 'kwp', 'speicher', 'art', 'zieher'].includes(el.name) && e.type === 'change') {
-        $('#d-ablauf').innerHTML = ablaufHtml(rec, false);
+        ablaufNeu();
       }
     }
     aktualisiereStatus();
@@ -626,7 +693,7 @@
   // ---------------------------------------------------------------
   function exportieren() {
     if (!window.XLSX) { toast('Excel-Modul lädt noch – bitte gleich nochmal.', 'fehler'); return; }
-    const liste = sortiere(S.daten.filter(passtBasis).map(d => ({ d, st: E.status(d) })).filter(x => passtSchritt(x.d, x.st)));
+    const liste = sortiere(aktuelleListe());
     const zeilen = liste.map(({ d, st }) => {
       const z = {
         'Jahr': d.jahr, 'Programm': d.programm, 'Fördercall': datumDE(d.foerdercall), 'Mitarbeiter': d.mitarbeiter, 'Ticket-Zieher': d.zieher,
@@ -648,6 +715,159 @@
     const wb = X.utils.book_new();
     X.utils.book_append_sheet(wb, ws, 'Förderungen');
     X.writeFile(wb, `EAG-Foerderungen_${heute()}.xlsx`);
+  }
+
+  // ---------------------------------------------------------------
+  // Automatisch aufteilen ("Würfeln"): offene Kunden eines Fördercalls
+  // zufällig und gleichmäßig auf die Ticket-Zieher verteilen
+  // ---------------------------------------------------------------
+  let wurf = null;
+
+  function zufall(n) {
+    const a = new Uint32Array(1);
+    crypto.getRandomValues(a);
+    return a[0] % n;
+  }
+  function mischen(liste) {
+    const a = liste.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = zufall(i + 1); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+
+  function wuerfelKandidaten(call, alle) {
+    return S.daten.filter(d => {
+      if (d.geloescht_am) return false;
+      if (call === 'ohne' ? !!d.foerdercall : d.foerdercall !== call) return false;
+      if (E.status(d).hoechster >= 2) return false; // Ticket schon gezogen
+      return alle || !(d.zieher || '').trim();
+    });
+  }
+
+  function wuerfelDialog() {
+    wurf = null;
+    const namen = speicherLokal.lesen('zieherliste', null) || zieherWerte();
+    const offen = S.daten.filter(d => !d.geloescht_am && !(d.zieher || '').trim() && E.status(d).hoechster < 2);
+    const calls = werte('foerdercall').sort().reverse();
+    const vorschlag = S.filter.call && S.filter.call !== 'ohne' ? S.filter.call
+      : (calls.find(c => offen.some(d => d.foerdercall === c)) || calls[0] || 'ohne');
+    const callOpt = calls.concat(S.daten.some(d => !d.foerdercall) ? ['ohne'] : [])
+      .map(c => `<option value="${esc(c)}" ${c === vorschlag ? 'selected' : ''}>${c === 'ohne' ? 'ohne Fördercall' : 'Fördercall ' + datumDE(c)}</option>`).join('');
+    dialog('Ticket-Zieher automatisch aufteilen', `
+      <p class="grau">Die App verteilt die Kunden zufällig und gleichmäßig. Du siehst das Ergebnis, bevor etwas gespeichert wird.</p>
+      <div class="wuerfel-raster">
+        <label class="feld"><span>Ticket-Zieher (ein Name pro Zeile)</span>
+          <textarea id="w-namen" rows="8" placeholder="Verena&#10;Thomas&#10;Bianca">${esc(namen.join('\n'))}</textarea></label>
+        <div class="wuerfel-optionen">
+          <label class="feld"><span>Welche Kunden?</span><select id="w-call">${callOpt}</select></label>
+          <label class="feld"><span>Höchstens Kunden pro Person (leer = egal)</span><input id="w-max" type="text" inputmode="numeric" placeholder="z. B. 5"></label>
+          <label class="haken-zeile"><input type="checkbox" id="w-alle"> Auch schon zugeteilte Kunden neu verteilen</label>
+          <div id="w-anzahl" class="klein grau"></div>
+        </div>
+      </div>
+      <div id="w-ergebnis"></div>`,
+      `<button class="btn" data-aktion="dialog-zu">Abbrechen</button>
+       <button class="btn" id="w-excel" disabled><svg><use href="#i-download"/></svg><span>Excel zum Versenden</span></button>
+       <button class="btn btn-wuerfel" id="w-los"><svg><use href="#i-dice"/></svg><span>Würfeln</span></button>
+       <button class="btn btn-primaer" id="w-uebernehmen" disabled><svg><use href="#i-check"/></svg><span>Übernehmen</span></button>`);
+    wuerfelAnzahl();
+  }
+
+  function wuerfelAnzahl() {
+    const el = $('#w-anzahl');
+    if (!el) return;
+    const k = wuerfelKandidaten($('#w-call').value, $('#w-alle').checked);
+    el.textContent = `${k.length} ${k.length === 1 ? 'Kunde wird' : 'Kunden werden'} verteilt.`;
+  }
+
+  function wuerfeln() {
+    const namen = Array.from(new Set($('#w-namen').value.split(/\n|,|;/).map(s => s.trim()).filter(Boolean)));
+    if (!namen.length) { toast('Bitte mindestens einen Ticket-Zieher eintragen.', 'fehler'); return; }
+    speicherLokal.schreiben('zieherliste', namen);
+    const call = $('#w-call').value;
+    const max = parseInt($('#w-max').value, 10) || Infinity;
+    const kunden = mischen(wuerfelKandidaten(call, $('#w-alle').checked));
+    if (!kunden.length) { toast('Für diese Auswahl gibt es keine offenen Kunden.', 'fehler'); return; }
+    const reihe = mischen(namen);
+    const verteilung = new Map(reihe.map(n => [n, []]));
+    const rest = [];
+    kunden.forEach(d => {
+      // reihum, beginnend bei einer zufälligen Reihenfolge der Namen
+      const frei = reihe.filter(n => verteilung.get(n).length < max);
+      if (!frei.length) { rest.push(d); return; }
+      const minimum = Math.min(...frei.map(n => verteilung.get(n).length));
+      const kandidat = frei.find(n => verteilung.get(n).length === minimum);
+      verteilung.get(kandidat).push(d);
+    });
+    wurf = { call, verteilung, rest };
+    const karten = namen.map(n => {
+      const l = verteilung.get(n);
+      return `<div class="wurf-karte"><div class="wurf-kopf"><b>${esc(n)}</b><span>${l.length}</span></div>
+        ${l.length ? `<ul>${l.map(d => `<li>${esc(d.kunde)}${d.ort ? `<span class="grau"> · ${esc(d.ort)}</span>` : ''}</li>`).join('')}</ul>` : '<p class="grau klein">keine Kunden</p>'}</div>`;
+    }).join('');
+    $('#w-ergebnis').innerHTML = `<h4 class="wurf-titel">Ergebnis</h4><div class="wurf-raster">${karten}</div>
+      ${rest.length ? `<p class="rot klein">${rest.length} Kunden bleiben übrig (Höchstzahl erreicht): ${esc(rest.map(d => d.kunde).join(', '))}</p>` : ''}`;
+    $('#w-los span').textContent = 'Neu würfeln';
+    $('#w-excel').disabled = false;
+    $('#w-uebernehmen').disabled = false;
+  }
+
+  async function wuerfelUebernehmen() {
+    if (!wurf) return;
+    const btn = $('#w-uebernehmen');
+    btn.disabled = true;
+    let ok = 0, fehler = 0;
+    for (const [name, liste] of wurf.verteilung) {
+      for (const d of liste) {
+        if (d.zieher === name) { ok++; continue; }
+        try {
+          const neu = await Q.aendern(d.id, { zieher: name }, d.geaendert_am);
+          Object.assign(d, neu); ok++;
+        } catch (e) { fehler++; }
+      }
+    }
+    toast(`${ok} Kunden zugeteilt${fehler ? `, ${fehler} Fehler – bitte Liste neu laden` : ''}.`, fehler ? 'fehler' : 'ok');
+    dialogZu();
+    fuelleFilter(); zeichne();
+  }
+
+  // Spalten wie in der bisherigen Excel-Liste der Ticket-Zieher
+  function zieherZeile(d, name) {
+    return {
+      'Ticket-Zieher': name, 'Mitarbeiter': d.mitarbeiter, 'Kunde': d.kunde, 'Geb. Dat bei nat. Person': datumDE(d.geburtsdatum),
+      'Vollmacht': d.vollmacht, 'Straße': d.strasse, 'PLZ': d.plz, 'Ort': d.ort, 'KG Grundstücksnummer': d.kg_gst,
+      'Einspeisezählpunktnummer': d.zaehlpunkt, 'Mail': d.mail, 'Projekt': d.projekt_nr, 'Größe kWp': d.kwp,
+      'Modulgröße m²': d.modulflaeche, 'Überschusseinspeiser Volleinspeiser': d.einspeisung === 'Überschuss' ? 'Ü' : d.einspeisung === 'Volleinspeisung' ? 'V' : d.einspeisung,
+      'WR Nennleistung': d.wr_leistung, 'Speicher Nettokapazität': d.speicher, 'Anbringung PV': d.anbringung, 'Zeitplan': d.zeitplan,
+      'Art der Förderung': d.art, 'Ticket gezogen Datum': '', 'Ticket': d.ticket, 'Projekt angelegt': d.fpj
+    };
+  }
+
+  function blattName(n, benutzt) {
+    let b = n.replace(/[\[\]:*?\/\\]/g, ' ').slice(0, 31).trim() || 'Zieher';
+    let i = 2;
+    while (benutzt.has(b)) b = (b.slice(0, 28) + ' ' + i++);
+    benutzt.add(b);
+    return b;
+  }
+
+  function wuerfelExcel() {
+    if (!wurf || !window.XLSX) return;
+    const X = window.XLSX;
+    const wb = X.utils.book_new();
+    const breiten = z => Object.keys(z[0] || {}).map(k => ({ wch: Math.min(38, Math.max(k.length, ...z.map(r => String(r[k] === null || r[k] === undefined ? '' : r[k]).length)) + 2) }));
+    const uebersicht = [];
+    wurf.verteilung.forEach((l, n) => l.forEach(d => uebersicht.push({ 'Ticket-Zieher': n, 'Kunde': d.kunde, 'Ort': d.ort, 'Mitarbeiter': d.mitarbeiter, 'Projekt': d.projekt_nr })));
+    const ws0 = X.utils.json_to_sheet(uebersicht);
+    ws0['!cols'] = breiten(uebersicht);
+    const benutzt = new Set(['Übersicht']);
+    X.utils.book_append_sheet(wb, ws0, 'Übersicht');
+    wurf.verteilung.forEach((l, n) => {
+      const zeilen = l.map(d => zieherZeile(d, n));
+      const ws = zeilen.length ? X.utils.json_to_sheet(zeilen) : X.utils.aoa_to_sheet([['keine Kunden']]);
+      if (zeilen.length) ws['!cols'] = breiten(zeilen);
+      X.utils.book_append_sheet(wb, ws, blattName(n, benutzt));
+    });
+    X.writeFile(wb, `Ticket-Aufteilung_${wurf.call === 'ohne' ? 'ohne-Call' : wurf.call}.xlsx`);
   }
 
   // ---------------------------------------------------------------
@@ -801,6 +1021,7 @@
       const a = e.target.closest('[data-aktion]');
       if (!$('#nutzer-menue').hidden && !e.target.closest('.kopf-nutzer')) $('#nutzer-menue').hidden = true;
       if (!a) return;
+      if (a.closest('#nutzer-menue')) $('#nutzer-menue').hidden = true;
       switch (a.dataset.aktion) {
         case 'neu': oeffne(null); break;
         case 'export': exportieren(); break;
@@ -811,6 +1032,8 @@
         case 'neu-laden': await laden(); toast('Aktualisiert.', 'ok'); break;
         case 'detail-zu': schliesseDetail(false); break;
         case 'dialog-zu': dialogZu(); break;
+        case 'wuerfeln': wuerfelDialog(); break;
+        case 'mehr-filter': $('#mehr-filter').hidden = !$('#mehr-filter').hidden; break;
         case 'filter-zurueck':
           Object.assign(S.filter, { suche: '', call: '', art: '', mitarbeiter: '', zieher: '', schritt: '', papierkorb: false });
           fuelleFilter(); zeichne(); break;
@@ -818,10 +1041,10 @@
     });
     $('#nutzer-btn').addEventListener('click', e => { e.stopPropagation(); $('#nutzer-menue').hidden = !$('#nutzer-menue').hidden; });
 
-    $('#pipeline').addEventListener('click', e => {
-      const b = e.target.closest('[data-schritt]');
+    $('#reiter').addEventListener('click', e => {
+      const b = e.target.closest('[data-ansicht]');
       if (!b) return;
-      S.filter.schritt = S.filter.schritt === b.dataset.schritt ? '' : b.dataset.schritt;
+      S.ansicht = b.dataset.ansicht; S.aufgeklappt.clear();
       zeichne();
     });
 
@@ -836,19 +1059,27 @@
         S.sort = S.sort.k === s.dataset.sort ? { k: s.dataset.sort, auf: !S.sort.auf } : { k: s.dataset.sort, auf: true };
         speicherLokal.schreiben('sort', S.sort); zeichne(); return;
       }
+      const mehr = e.target.closest('[data-mehr]');
+      if (mehr) { S.aufgeklappt.add(mehr.dataset.mehr); zeichne(); return; }
       const q = e.target.closest('[data-schnell]');
-      const tr = e.target.closest('tr[data-id]');
+      const tr = e.target.closest('tr[data-id], .zeile[data-id]');
       if (q && tr) { e.stopPropagation(); schnellErledigt(tr.dataset.id, q.dataset.schnell); return; }
       if (tr) oeffne(S.daten.find(d => d.id === tr.dataset.id));
     });
     $('#liste').addEventListener('keydown', e => {
-      const tr = e.target.closest('tr[data-id]');
+      const tr = e.target.closest('tr[data-id], .zeile[data-id]');
       if (tr && e.key === 'Enter' && e.target === tr) oeffne(S.daten.find(d => d.id === tr.dataset.id));
     });
 
     $('#d-inhalt').addEventListener('input', aufFormEingabe);
     $('#d-inhalt').addEventListener('change', aufFormEingabe);
     $('#d-speichern').addEventListener('click', speichern);
+    $('#d-inhalt').addEventListener('click', e => {
+      const b = e.target.closest('[data-jetzt]');
+      if (!b || !S.detail) return;
+      S.detail.rec.schritte = Object.assign({}, S.detail.rec.schritte, { [b.dataset.jetzt]: heute() });
+      speichern();
+    });
     $('#detail').addEventListener('click', e => {
       if (e.target.closest('#d-loeschen')) papierkorb();
       else if (e.target.closest('#d-endgueltig')) endgueltigLoeschen();
@@ -857,11 +1088,15 @@
 
     $('#dialog').addEventListener('change', e => {
       if (e.target.id === 'imp-datei' && e.target.files[0]) importDatei(e.target.files[0]);
+      else if (e.target.id === 'w-call' || e.target.id === 'w-alle') wuerfelAnzahl();
       else nutzerAendern(e);
     });
     $('#dialog').addEventListener('click', e => {
       if (e.target.id === 'dialog') { dialogZu(); return; }
       if (e.target.closest('#imp-los')) importAusfuehren();
+      else if (e.target.closest('#w-los')) wuerfeln();
+      else if (e.target.closest('#w-excel')) wuerfelExcel();
+      else if (e.target.closest('#w-uebernehmen')) wuerfelUebernehmen();
       else if (e.target.closest('#pw-los')) passwortSpeichern();
       else nutzerAktion(e);
     });

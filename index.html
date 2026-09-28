@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/app.css?v=1">
+  <link rel="stylesheet" href="css/app.css?v=2">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -32,6 +32,8 @@
     <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2.5L4.5 13.5H11L10 21.5l8.5-11H12z"/></symbol>
     <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></symbol>
     <symbol id="i-history" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-dice" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="9" cy="9" r=".9" fill="currentColor"/><circle cx="15" cy="15" r=".9" fill="currentColor"/><circle cx="15" cy="9" r=".9" fill="currentColor"/><circle cx="9" cy="15" r=".9" fill="currentColor"/><circle cx="12" cy="12" r=".9" fill="currentColor"/></symbol>
     <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 5h16l-6.2 7.5V19l-3.6 1.5v-8z"/></symbol>
   </svg>
 
@@ -72,14 +74,15 @@
     <header class="kopf">
       <div class="marke"><span class="marke-zeichen"><svg><use href="#i-sun"/></svg></span><span><b>SOLPRO</b> <span class="marke-sub">EAG-Förderungen</span></span></div>
       <div class="kopf-aktionen">
-        <button class="btn btn-kopf" data-aktion="neu" data-recht="bearbeiten"><svg><use href="#i-plus"/></svg><span>Neue Förderung</span></button>
-        <button class="btn btn-kopf btn-icon" data-aktion="export" title="Als Excel herunterladen"><svg><use href="#i-download"/></svg><span>Excel</span></button>
-        <button class="btn btn-kopf btn-icon" data-aktion="import" data-recht="admin" title="Excel-Liste importieren"><svg><use href="#i-upload"/></svg><span>Import</span></button>
-        <button class="btn btn-kopf btn-icon" data-aktion="nutzer" data-recht="admin" title="Nutzer &amp; Rollen"><svg><use href="#i-users"/></svg><span>Nutzer</span></button>
+        <button class="btn btn-kopf btn-kopf-haupt" data-aktion="neu" data-recht="bearbeiten"><svg><use href="#i-plus"/></svg><span>Neuer Kunde</span></button>
+        <button class="btn btn-kopf" data-aktion="import" data-recht="admin" title="Excel-Liste importieren"><svg><use href="#i-upload"/></svg><span>Excel-Import</span></button>
         <div class="kopf-nutzer">
-          <button class="btn btn-kopf btn-icon" id="nutzer-btn" title="Konto"><svg><use href="#i-user"/></svg><span id="nutzer-name"></span></button>
+          <button class="btn btn-kopf btn-rund" id="nutzer-btn" title="Menü"><svg><use href="#i-menu"/></svg></button>
           <div class="menue" id="nutzer-menue" hidden>
-            <div class="menue-info"><span id="nutzer-mail"></span><span class="rolle" id="nutzer-rolle"></span></div>
+            <div class="menue-info"><b id="nutzer-name"></b><span id="nutzer-mail" class="grau"></span><span class="rolle" id="nutzer-rolle"></span></div>
+            <button class="menue-punkt" data-aktion="export"><svg><use href="#i-download"/></svg>Als Excel herunterladen</button>
+            <button class="menue-punkt" data-aktion="nutzer" data-recht="admin"><svg><use href="#i-users"/></svg>Nutzer &amp; Rollen</button>
+            <button class="menue-punkt" data-aktion="neu-laden"><svg><use href="#i-refresh"/></svg>Aktualisieren</button>
             <button class="menue-punkt" data-aktion="passwort"><svg><use href="#i-user"/></svg>Passwort ändern</button>
             <button class="menue-punkt" data-aktion="abmelden"><svg><use href="#i-logout"/></svg>Abmelden</button>
           </div>
@@ -88,25 +91,22 @@
     </header>
 
     <main class="inhalt">
-      <section class="pipeline" id="pipeline" aria-label="Was ist zu tun"></section>
-
       <section class="werkzeug">
-        <label class="suche"><svg><use href="#i-search"/></svg><input type="search" id="f-suche" placeholder="Kunde, Ort, Zählpunkt, Projekt, Ticket …"></label>
-        <div class="filter">
-          <select id="f-jahr" title="Jahr"></select>
-          <select id="f-call" title="Fördercall"></select>
-          <select id="f-art" title="Art"></select>
-          <select id="f-mitarbeiter" title="Mitarbeiter (Verkauf)"></select>
-          <select id="f-zieher" title="Ticket-Zieher"></select>
-          <label class="schalter" title="Gelöschte Einträge anzeigen" data-recht="bearbeiten"><input type="checkbox" id="f-papierkorb"><span>Papierkorb</span></label>
-          <button class="btn btn-leise" data-aktion="filter-zurueck" id="filter-zurueck" hidden><svg><use href="#i-close"/></svg>Filter zurücksetzen</button>
-        </div>
+        <label class="suche"><svg><use href="#i-search"/></svg><input type="search" id="f-suche" placeholder="Kunde suchen (Name, Ort, Zählpunkt, Projekt …)"></label>
+        <select id="f-jahr" class="jahr-wahl" title="Jahr"></select>
+        <button class="btn btn-filter" data-aktion="mehr-filter" id="mehr-filter-btn"><svg><use href="#i-filter"/></svg><span>Filter</span></button>
+      </section>
+      <section class="filter" id="mehr-filter" hidden>
+        <select id="f-call" title="Fördercall"></select>
+        <select id="f-art" title="Art"></select>
+        <select id="f-mitarbeiter" title="Mitarbeiter (Verkauf)"></select>
+        <select id="f-zieher" title="Ticket-Zieher"></select>
+        <label class="schalter" title="Gelöschte Einträge anzeigen" data-recht="bearbeiten"><input type="checkbox" id="f-papierkorb"><span>Papierkorb</span></label>
+        <button class="btn btn-leise" data-aktion="filter-zurueck" id="filter-zurueck" hidden><svg><use href="#i-close"/></svg>Zurücksetzen</button>
       </section>
 
-      <div class="liste-kopf">
-        <div id="liste-info" class="liste-info"></div>
-        <button class="btn btn-leise btn-icon" data-aktion="neu-laden" title="Neu laden"><svg><use href="#i-refresh"/></svg><span>Aktualisieren</span></button>
-      </div>
+      <nav class="reiter" id="reiter" aria-label="Ansicht"></nav>
+      <div id="liste-info" class="liste-info"></div>
       <section id="liste" class="liste"></section>
     </main>
   </div>
@@ -148,8 +148,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
   <script src="js/config.js?v=1"></script>
-  <script src="js/daten.js?v=1"></script>
+  <script src="js/daten.js?v=2"></script>
   <script src="js/import.js?v=1"></script>
-  <script src="js/app.js?v=1"></script>
+  <script src="js/app.js?v=2"></script>
 </body>
 </html>

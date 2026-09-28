@@ -289,7 +289,8 @@ body.demo .kopf::after { content: "DEMO – keine echten Daten"; position: absol
   .detail-raster { grid-template-columns: 1fr; }
   .karte-ablauf { position: static; }
   .felder { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .kopf-aktionen .btn span:not(#nutzer-name) { display: none; }
+  .kopf-aktionen .btn span { display: none; }
+  .kopf-aktionen .btn.btn-kopf-haupt span { display: inline; }
   .kopf-aktionen .btn { padding: 0 10px; }
 }
 @media (max-width: 760px) {
@@ -340,4 +341,116 @@ body.demo .kopf::after { content: "DEMO – keine echten Daten"; position: absol
   .stufe-titel { font-size: 11.5px; }
   .felder { grid-template-columns: 1fr; }
   .feld.breit { grid-column: auto; }
+}
+
+/* =========================================================
+   Einfache Übersicht (Reiter, Aufgaben-Gruppen, Würfeln)
+   ========================================================= */
+.inhalt { max-width: 1080px; }
+.btn-kopf-haupt { background: var(--gruen); border-color: var(--gruen); color: #fff; height: 40px; padding: 0 16px; font-weight: 600; }
+.btn-kopf-haupt:hover { background: #a5cf1f; border-color: #a5cf1f; }
+.kopf .btn-kopf { height: 40px; }
+.kopf .btn-rund { width: 40px; }
+.menue-info b { font-size: 14px; }
+
+.werkzeug { flex-wrap: nowrap; }
+.suche { height: 46px; font-size: 15px; box-shadow: var(--schatten); }
+.jahr-wahl { height: 46px; border: 1px solid var(--linie); border-radius: 9px; background: var(--flaeche); padding: 0 28px 0 12px; font-weight: 500; cursor: pointer; }
+.btn-filter { height: 46px; }
+.btn-filter.aktiv { border-color: var(--gruen); background: var(--gruen-hell); color: var(--gruen-dunkel); }
+#mehr-filter { margin-top: -6px; padding: 12px; background: var(--flaeche); border: 1px solid var(--linie); border-radius: 12px; }
+
+.reiter { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.reiter-knopf { display: grid; justify-items: center; gap: 0; padding: 12px 8px 10px; background: var(--flaeche); border: 1px solid var(--linie); border-radius: 12px; cursor: pointer; color: var(--text-2); transition: border-color .12s, background .12s; }
+.reiter-knopf:hover { border-color: #c9d6b0; }
+.reiter-knopf b { font-size: 26px; line-height: 1.15; color: var(--text); font-variant-numeric: tabular-nums; }
+.reiter-knopf span { font-weight: 600; font-size: 15px; color: var(--text); }
+.reiter-knopf small { font-size: 12px; color: var(--text-3); }
+.reiter-knopf.aktiv { border: 2px solid var(--gruen); background: var(--gruen-hell); padding: 11px 7px 9px; }
+.reiter-knopf.aktiv b, .reiter-knopf.aktiv span { color: var(--gruen-dunkel); }
+.liste-info:empty { display: none; }
+
+.gruppe { --farbe: var(--text-3); }
+.g-vor { --farbe: var(--blau); }
+.g-antrag { --farbe: var(--violett); }
+.g-abrechnung { --farbe: var(--amber); }
+.g-fertig { --farbe: var(--gruen-dunkel); }
+.gruppe + .gruppe { margin-top: 10px; }
+.gruppe-kopf { display: flex; align-items: center; gap: 10px; margin: 0 2px 8px; flex-wrap: wrap; }
+.gruppe-nr { width: 26px; height: 26px; border-radius: 50%; background: var(--farbe); color: #fff; font-size: 12.5px; font-weight: 700; display: grid; place-items: center; }
+.gruppe-nr svg { width: 15px; height: 15px; stroke-width: 2.6; }
+.gruppe-kopf h2 { font-size: 17px; }
+.anz { font-weight: 700; font-size: 13px; color: var(--farbe); background: color-mix(in srgb, var(--farbe) 12%, #fff); border-radius: 6px; padding: 1px 8px; }
+.btn-wuerfel { color: var(--violett); border-color: #d6d0f5; background: #f5f3fe; font-weight: 600; }
+.btn-wuerfel:hover { background: var(--violett); color: #fff; border-color: var(--violett); }
+.gruppe-kopf .btn-wuerfel { margin-left: auto; height: 34px; }
+.gruppe-karte { background: var(--flaeche); border: 1px solid var(--linie); border-left: 4px solid var(--farbe); border-radius: 12px; box-shadow: var(--schatten); overflow: hidden; }
+
+.zeile { display: grid; grid-template-columns: minmax(0, 1fr) 170px auto; align-items: center; gap: 16px; padding: 13px 16px; border-top: 1px solid var(--linie-2); cursor: pointer; transition: background .1s; }
+.zeile:first-child { border-top: 0; }
+.zeile:hover { background: #f9fbf5; }
+.zeile:focus-visible { outline: 2px solid var(--gruen); outline-offset: -2px; }
+.zeile .name { font-weight: 600; font-size: 15.5px; }
+.zeile .info { font-size: 13px; color: var(--text-2); margin-top: 1px; }
+.zeile .hinweis { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; color: var(--amber); margin-top: 3px; }
+.zeile .hinweis svg { width: 15px; height: 15px; margin-top: 1px; }
+.zeile .hinweis.warn { color: var(--rot); }
+.zeile-stand { display: grid; gap: 3px; }
+.zeile-stand span { font-size: 11.5px; color: var(--text-3); }
+.zeile-stand .balken { margin-top: 0; }
+.zeile-knopf { justify-self: end; }
+.erledigt { display: inline-flex; align-items: center; gap: 7px; height: 40px; padding: 0 16px; border-radius: 10px; border: 1.5px solid var(--gruen); background: #fff; color: var(--gruen-dunkel); font-weight: 600; white-space: nowrap; cursor: pointer; transition: background .12s, color .12s; }
+.erledigt svg { width: 17px; height: 17px; stroke-width: 2.4; }
+.erledigt:hover { background: var(--gruen); color: #fff; }
+.erledigt-leise { border-color: var(--linie); color: var(--text); }
+.erledigt-leise:hover { background: var(--linie-2); color: var(--text); }
+.zeile-fertig { display: inline-flex; align-items: center; gap: 6px; color: var(--gruen-dunkel); font-weight: 600; font-size: 13.5px; }
+.zeile-fertig svg { width: 16px; height: 16px; }
+.mehr { display: block; width: 100%; padding: 12px; background: #fafbf9; border: 0; border-top: 1px solid var(--linie-2); color: var(--blau); font-weight: 600; cursor: pointer; }
+.mehr:hover { background: var(--linie-2); }
+
+/* Detail: "Als Nächstes" */
+.jetzt { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 16px 18px; margin-bottom: 16px; border-radius: 12px; background: var(--gruen-hell); border: 1px solid #d9e8b2; }
+.jetzt-text { flex: 1; min-width: 220px; display: grid; gap: 2px; }
+.jetzt-text small { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--gruen-dunkel); }
+.jetzt-text b { font-size: 19px; }
+.jetzt-text span { font-size: 13px; color: var(--text-2); }
+.jetzt-neu { background: var(--blau-hell); border-color: #cfe0f3; }
+.jetzt-neu small { color: var(--blau); }
+.jetzt-fertig b { color: var(--gruen-dunkel); }
+.erledigt-gross { height: 46px; padding: 0 20px; background: var(--gruen); color: #fff; font-size: 15px; }
+.erledigt-gross:hover { background: var(--gruen-dunkel); border-color: var(--gruen-dunkel); }
+
+/* Würfeln */
+.wuerfel-raster { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 8px; }
+.wuerfel-optionen { display: grid; gap: 12px; align-content: start; }
+.haken-zeile { display: flex; gap: 8px; align-items: center; font-size: 13.5px; cursor: pointer; }
+.haken-zeile input { accent-color: var(--gruen); width: 16px; height: 16px; margin: 0; }
+.wurf-titel { margin: 16px 0 8px; font-size: 14px; }
+.wurf-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.wurf-karte { border: 1px solid var(--linie); border-radius: 10px; padding: 10px 12px; background: #fafbf9; }
+.wurf-kopf { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.wurf-kopf span { font-weight: 700; color: var(--violett); background: #f0edfd; border-radius: 6px; padding: 0 8px; font-size: 13px; }
+.wurf-karte ul { margin: 0; padding-left: 16px; font-size: 13px; display: grid; gap: 2px; }
+#dlg-fuss { flex-wrap: wrap; }
+#dlg-fuss .btn:first-child { margin-right: auto; }
+#dlg-fuss .btn:nth-last-child(2) { margin-left: 0; }
+
+@media (max-width: 760px) {
+  .werkzeug { flex-wrap: wrap; }
+  .suche { flex: 1 1 100%; }
+  .jahr-wahl { flex: 1; }
+  .reiter { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reiter-knopf b { font-size: 22px; }
+  .zeile { grid-template-columns: 1fr; gap: 8px; }
+  .zeile-knopf { justify-self: stretch; }
+  .erledigt { width: 100%; justify-content: center; height: 44px; }
+  .zeile-fertig { justify-content: flex-start; }
+  .gruppe-kopf .btn-wuerfel { margin-left: 0; width: 100%; justify-content: center; }
+  .wuerfel-raster { grid-template-columns: 1fr; }
+  .kopf-aktionen .btn.btn-kopf-haupt span { display: inline; }
+  .kopf-aktionen .btn[data-aktion="import"] span { display: none; }
+}
+@media (max-width: 380px) {
+  .kopf-aktionen .btn.btn-kopf-haupt span { display: none; }
 }
