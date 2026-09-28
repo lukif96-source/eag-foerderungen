@@ -11,7 +11,7 @@
     { key: 'ticket',            label: 'Ticket gezogen',              todo: 'Ticket ziehen', knopf: 'Ticket gezogen', kurz: 'Ticket' },
     { key: 'projekt',           label: 'Projekt angelegt',            todo: 'Projekt anlegen', knopf: 'Projekt angelegt', kurz: 'Projekt' },
     { key: 'eingereicht',       label: 'Im Portal eingereicht',       todo: 'Im Portal einreichen', knopf: 'Eingereicht', kurz: 'Eingereicht' },
-    { key: 'vertrag_erhalten',  label: 'Fördervertrag erhalten',      todo: 'Vertrag abwarten', knopf: 'Vertrag erhalten', warten: 'Warten auf Fördervertrag', kurz: 'Vertrag da' },
+    { key: 'vertrag_erhalten',  label: 'Fördervertrag erhalten',      todo: 'Fördervertrag abwarten', knopf: 'Vertrag erhalten', warten: 'Warten auf Fördervertrag', kurz: 'Vertrag da' },
     { key: 'vertrag_versendet', label: 'Vertrag an Kunden versendet', todo: 'Vertrag versenden', knopf: 'Versendet', kurz: 'Vertrag versendet' },
     { key: 'rechnung',          label: 'Rechnung hochgeladen',        todo: 'Rechnung hochladen', knopf: 'Hochgeladen', kurz: 'Rechnung' },
     { key: 'zahlung',           label: 'Zahlung hochgeladen',         todo: 'Zahlung hochladen', knopf: 'Hochgeladen', kurz: 'Zahlung' },

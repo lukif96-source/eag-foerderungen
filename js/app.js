@@ -57,7 +57,7 @@
     filter: Object.assign({ suche: '', jahr: String(new Date().getFullYear()), call: '', art: '', mitarbeiter: '', zieher: '', papierkorb: false, schritt: '' }, speicherLokal.lesen('filter', {})),
     sort: speicherLokal.lesen('sort', { k: 'call', auf: true }),
     detail: null, geladenUm: 0,
-    ansicht: speicherLokal.lesen('ansicht', 'todo'), aufgeklappt: new Set()
+    ansicht: ['offen', 'fertig', 'alle'].includes(speicherLokal.lesen('ansicht', 'offen')) ? speicherLokal.lesen('ansicht', 'offen') : 'offen', aufgeklappt: new Set()
   };
   S.filter.suche = '';
   S.filter.papierkorb = false;
@@ -238,8 +238,7 @@
 
   // Ansicht: "todo" = wir sind dran, "warten" = Förderstelle/Kunde ist dran, "fertig", "alle"
   function kategorie(st) {
-    if (st.fertig) return 'fertig';
-    return SCHRITTE[st.naechster].warten ? 'warten' : 'todo';
+    return st.fertig ? 'fertig' : 'offen';
   }
 
   function aktuelleListe() {
@@ -266,12 +265,11 @@
   }
 
   function zeichneReiter(basis) {
-    const n = { todo: 0, warten: 0, fertig: 0, alle: basis.length };
+    const n = { offen: 0, fertig: 0, alle: basis.length };
     basis.forEach(x => { n[kategorie(x.st)]++; });
     const r = (k, titel, sub) => `<button class="reiter-knopf ${S.ansicht === k ? 'aktiv' : ''}" data-ansicht="${k}">
       <b>${n[k]}</b><span>${titel}</span><small>${sub}</small></button>`;
-    $('#reiter').innerHTML = r('todo', 'Zu tun', 'wir sind dran') + r('warten', 'Warten', 'Förderstelle ist dran') +
-      r('fertig', 'Fertig', 'ausgezahlt') + r('alle', 'Alle', 'komplette Liste');
+    $('#reiter').innerHTML = r('offen', 'Offen', 'noch nicht ausgezahlt') + r('fertig', 'Fertig', 'ausgezahlt') + r('alle', 'Alle', 'komplette Liste');
   }
 
   function zeileHtml(d, st, bearbeiten) {
@@ -300,6 +298,8 @@
     </div>`;
   }
 
+  function phaseVon(i) { return i < 2 ? 'vor' : i < 7 ? 'antrag' : 'abrechnung'; }
+
   function zeichneGruppen(liste) {
     const bearbeiten = darf('bearbeiten') && !S.filter.papierkorb;
     const gruppen = new Map();
@@ -308,30 +308,45 @@
       if (!gruppen.has(key)) gruppen.set(key, []);
       gruppen.get(key).push(x);
     });
-    const reihenfolge = SCHRITTE.map(s => s.key).concat(['fertig']);
-    const leerText = { todo: 'Nichts zu tun – alles erledigt.', warten: 'Im Moment wartest du auf nichts.', fertig: 'Noch keine Förderung ausgezahlt.' }[S.ansicht];
     $('#liste-info').innerHTML = S.filter.papierkorb ? '<b class="rot">Papierkorb</b>' : '';
-    if (!liste.length) {
-      $('#liste').innerHTML = `<div class="leer-hinweis">${S.daten.length ? (S.filter.suche ? 'Kein Kunde gefunden.' : leerText) : (darf('admin') ? 'Noch keine Kunden. Oben auf „Neuer Kunde“ klicken oder die Excel-Liste importieren.' : 'Noch keine Kunden erfasst.')}</div>`;
+    if (!S.daten.length) {
+      $('#liste').innerHTML = `<div class="leer-hinweis">${darf('admin') ? 'Noch keine Kunden. Oben auf „Neuer Kunde“ klicken oder die Excel-Liste importieren.' : 'Noch keine Kunden erfasst.'}</div>`;
       return;
     }
-    const zeigen = S.filter.suche ? 999 : 6;
-    $('#liste').innerHTML = reihenfolge.filter(k => gruppen.has(k)).map(k => {
-      const eintraege = gruppen.get(k).sort((a, b) => ((a.d.foerdercall || '9999') + a.d.kunde).localeCompare((b.d.foerdercall || '9999') + b.d.kunde, 'de'));
-      const i = SCHRITTE.findIndex(s => s.key === k);
-      const s = SCHRITTE[i];
-      const phase = k === 'fertig' ? 'fertig' : i < 2 ? 'vor' : i < 7 ? 'antrag' : 'abrechnung';
-      const titel = k === 'fertig' ? 'Ausgezahlt' : (s.warten || s.todo);
+    const suche = !!S.filter.suche;
+    const zeigen = suche ? 999 : 6;
+    const keys = S.ansicht === 'fertig' ? ['fertig'] : SCHRITTE.map(x => x.key);
+
+    // Schrittleiste: alle Schritte mit Anzahl, Klick springt zur Gruppe
+    const leiste = S.ansicht === 'fertig' ? '' : `<nav class="schrittleiste" aria-label="Ablauf">${SCHRITTE.map((st, i) => {
+      const n = (gruppen.get(st.key) || []).length;
+      return `<a href="#gruppe-${st.key}" class="sl sl-${phaseVon(i)} ${n ? '' : 'leer'} ${st.warten ? 'sl-warten' : ''}" title="${esc(st.warten || st.todo)}">
+        <span class="sl-nr">${i + 1}</span><span class="sl-zahl">${n}</span><span class="sl-text">${esc(st.todo)}</span></a>`;
+    }).join('')}</nav>`;
+
+    const gruppenHtml = keys.map(k => {
+      const eintraege = (gruppen.get(k) || []).sort((a, b) => ((a.d.foerdercall || '9999') + a.d.kunde).localeCompare((b.d.foerdercall || '9999') + b.d.kunde, 'de'));
+      const i = SCHRITTE.findIndex(x => x.key === k);
+      const st = SCHRITTE[i];
+      const phase = k === 'fertig' ? 'fertig' : phaseVon(i);
+      const titel = k === 'fertig' ? 'Ausgezahlt' : st.todo;
+      const warten = st && st.warten ? '<span class="warte-tag">wartet auf Förderstelle</span>' : '';
+      if (!eintraege.length) {
+        if (suche) return '';
+        return `<section class="gruppe gruppe-leer g-${phase}" id="gruppe-${k}">
+          <div class="gruppe-kopf"><span class="gruppe-nr">${i + 1}</span><h2>${esc(titel)}</h2>${warten}<span class="leer-text">nichts offen</span></div></section>`;
+      }
       const offen = S.aufgeklappt.has(k) || eintraege.length <= zeigen + 1;
       const extra = k === 'aufgeteilt' && bearbeiten ? '<button class="btn btn-wuerfel" data-aktion="wuerfeln"><svg><use href="#i-dice"/></svg>Automatisch aufteilen</button>' : '';
-      return `<section class="gruppe g-${phase}">
-        <div class="gruppe-kopf"><span class="gruppe-nr">${k === 'fertig' ? '<svg><use href="#i-check"/></svg>' : i + 1}</span><h2>${esc(titel)}</h2><span class="anz">${eintraege.length}</span>${extra}</div>
+      return `<section class="gruppe g-${phase} ${st && st.warten ? 'gruppe-warten' : ''}" id="gruppe-${k}">
+        <div class="gruppe-kopf"><span class="gruppe-nr">${k === 'fertig' ? '<svg><use href="#i-check"/></svg>' : i + 1}</span><h2>${esc(titel)}</h2><span class="anz">${eintraege.length}</span>${warten}${extra}</div>
         <div class="gruppe-karte">
           ${(offen ? eintraege : eintraege.slice(0, zeigen)).map(x => zeileHtml(x.d, x.st, bearbeiten)).join('')}
           ${offen ? '' : `<button class="mehr" data-mehr="${k}">Alle ${eintraege.length} anzeigen</button>`}
         </div>
       </section>`;
     }).join('');
+    $('#liste').innerHTML = leiste + (gruppenHtml.trim() ? gruppenHtml : `<div class="leer-hinweis">${suche ? 'Kein Kunde gefunden.' : 'Noch keine Förderung ausgezahlt.'}</div>`);
   }
 
   function fortschritt(d, st) {
@@ -464,7 +479,7 @@
     const n = SCHRITTE[st.naechster];
     const hinweis = n.key === 'daten' ? 'Unten die fehlenden Angaben ergänzen: ' + E.fehlendeDaten(rec).join(', ')
       : n.key === 'aufgeteilt' ? 'Unten bei „Förderung“ den Ticket-Zieher eintragen' : '';
-    return `<div class="jetzt"><div class="jetzt-text"><small>Als Nächstes · Schritt ${st.naechster + 1} von ${SCHRITTE.length}</small><b>${esc(n.warten || n.todo)}</b>${hinweis ? `<span>${esc(hinweis)}</span>` : ''}</div>
+    return `<div class="jetzt"><div class="jetzt-text"><small>Als Nächstes · Schritt ${st.naechster + 1} von ${SCHRITTE.length}</small><b>${esc(n.todo)}</b>${n.warten ? '<span>Wartet auf die Förderstelle – abhaken, sobald es da ist.</span>' : ''}${hinweis ? `<span>${esc(hinweis)}</span>` : ''}</div>
       ${!nurLesen && !n.auto ? `<button class="erledigt erledigt-gross" data-jetzt="${n.key}"><svg><use href="#i-check"/></svg>${esc(n.knopf)} – speichern</button>` : ''}</div>`;
   }
 
