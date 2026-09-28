@@ -148,6 +148,7 @@
         return pruefe(await sb.from('foerder_verlauf').select('*').eq('foerderung_id', id).order('zeit', { ascending: false }).limit(200));
       },
       async nutzerListe() { return pruefe(await sb.from('foerder_nutzer').select('*').order('name')); },
+      async offeneKonten() { return pruefe(await sb.rpc('foerder_offene_konten')); },
       async nutzerSpeichern(n) { return pruefe(await sb.from('foerder_nutzer').upsert(n).select().single()); },
       async nutzerLoeschen(mail) { pruefe(await sb.from('foerder_nutzer').delete().eq('email', mail)); },
       async massenAnlegen(recs) {
@@ -222,6 +223,7 @@
       async loeschen(id) { daten = daten.filter(d => d.id !== id); },
       async verlauf(id) { return kopie(verlauf.filter(v => v.foerderung_id === id)); },
       async nutzerListe() { return kopie(nutzer); },
+      async offeneKonten() { return [{ email: 'neu@solpro.at', registriert_am: jetzt() }]; },
       async nutzerSpeichern(n) { nutzer = nutzer.filter(x => x.email !== n.email).concat([n]); return kopie(n); },
       async nutzerLoeschen(mail) { nutzer = nutzer.filter(x => x.email !== mail); },
       async massenAnlegen(recs) { const out = []; for (const r of recs) out.push(await this.anlegen(r)); return out; }

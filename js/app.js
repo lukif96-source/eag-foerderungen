@@ -99,7 +99,7 @@
   let loginModus = 'anmelden';
   function setzeLoginModus(m) {
     loginModus = m;
-    $('#login-titel').textContent = { anmelden: 'Bitte melde dich an.', registrieren: 'Neues Konto anlegen. Danach muss dich der Admin freischalten.', vergessen: 'Wir schicken dir einen Link zum Zurücksetzen.' }[m];
+    $('#login-titel').textContent = { anmelden: 'Bitte melde dich an.', registrieren: 'Neues Konto anlegen. Danach schaltet dich der Admin frei.', vergessen: 'Wir schicken dir einen Link zum Zurücksetzen.' }[m];
     $('#login-btn').textContent = { anmelden: 'Anmelden', registrieren: 'Konto anlegen', vergessen: 'Link senden' }[m];
     $('#login-pw-feld').hidden = m === 'vergessen';
     $('#login-pw').required = m !== 'vergessen';
@@ -120,7 +120,7 @@
         await Q.anmelden(mail, pw);
       } else if (loginModus === 'registrieren') {
         const r = await Q.registrieren(mail, pw);
-        fehler.textContent = r && r.session ? 'Konto angelegt.' : 'Konto angelegt. Bitte bestätige den Link in der E-Mail, danach anmelden.';
+        fehler.textContent = 'Konto angelegt. Sobald der Admin dich freischaltet, siehst du die Förderliste.';
         fehler.classList.add('ok'); fehler.hidden = false;
         setzeLoginModus('anmelden');
         fehler.hidden = false;
@@ -575,6 +575,45 @@
     aktualisiereStatus();
   }
 
+  // Gleiche Projekt-Nr. oder FPJ = sicher doppelt (hart); gleicher Kunde/Zählpunkt im selben Jahr = wahrscheinlich (weich)
+  function doppelte(rec, neu, orig) {
+    const nr = v => (v || '').replace(/\s/g, '').toUpperCase();
+    const andere = S.daten.filter(d => d.id !== rec.id && !d.geloescht_am);
+    const nrGeaendert = neu || nr(rec.projekt_nr) !== nr(orig.projekt_nr) || nr(rec.fpj) !== nr(orig.fpj);
+    const hart = !nrGeaendert ? [] : andere.filter(d =>
+      (nr(rec.projekt_nr) && nr(d.projekt_nr) === nr(rec.projekt_nr)) || (nr(rec.fpj) && nr(d.fpj) === nr(rec.fpj)));
+    const zp = E.zpNorm(rec.zaehlpunkt);
+    const weich = !neu ? [] : andere.filter(d => !hart.includes(d) && d.jahr === rec.jahr &&
+      (E.gleicherKunde(d, rec) || (zp.length >= 20 && E.zpNorm(d.zaehlpunkt) === zp && !/erweiterung/i.test(rec.kunde))));
+    return { hart, weich };
+  }
+
+  function doppeltFrage({ hart, weich }) {
+    return new Promise(res => {
+      const t = hart[0] || weich[0];
+      const was = hart.length
+        ? (t.projekt_nr && t.projekt_nr.replace(/\s/g, '').toUpperCase() === (S.detail.rec.projekt_nr || '').replace(/\s/g, '').toUpperCase() ? 'Projekt-Nr. ' + t.projekt_nr : 'FPJ-Nr. ' + t.fpj)
+        : 'diesen Kunden';
+      const o = document.createElement('div');
+      o.className = 'overlay overlay-frage';
+      o.innerHTML = `<div class="panel panel-klein" role="alertdialog" aria-modal="true"><div class="panel-inhalt">
+          <p><b>${hart.length ? 'Dieses Projekt gibt es schon.' : 'Diesen Kunden gibt es vermutlich schon.'}</b></p>
+          <p class="grau">Es gibt bereits einen Eintrag mit ${esc(was)}:</p>
+          <div class="doppelt-karte"><b>${esc(t.kunde)}</b><span class="grau">${esc([[t.plz, t.ort].filter(Boolean).join(' '), t.projekt_nr, t.jahr].filter(Boolean).join(' · '))}</span></div>
+          ${hart.length ? '<p class="klein grau">Ein Projekt darf nur einmal angelegt werden.</p>' : '<p class="klein grau">Nur „trotzdem anlegen“, wenn es wirklich ein eigenes Projekt ist (z. B. eine Erweiterung).</p>'}
+        </div>
+        <footer class="panel-fuss"><button class="btn" data-a="nein">Abbrechen</button>
+          ${hart.length ? '' : '<button class="btn" data-a="trotzdem">Trotzdem anlegen</button>'}
+          <button class="btn btn-primaer" data-a="oeffnen">Vorhandenen öffnen</button></footer></div>`;
+      const zu = v => { o.remove(); document.removeEventListener('keydown', taste, true); res(v); };
+      const taste = e => { if (e.key === 'Escape') { e.stopPropagation(); zu(false); } };
+      o.addEventListener('click', e => { const a = e.target.closest('[data-a]'); if (a) zu(a.dataset.a); else if (e.target === o) zu(false); });
+      document.addEventListener('keydown', taste, true);
+      document.body.appendChild(o);
+      $('[data-a="oeffnen"]', o).focus();
+    });
+  }
+
   async function speichern() {
     const D = S.detail;
     if (!D) return;
@@ -582,6 +621,13 @@
     $$('#d-inhalt [name]').forEach(el => { D.rec[el.name] = formWert(el); });
     const rec = D.rec;
     if (!rec.kunde) { toast('Bitte einen Kunden eintragen.', 'fehler'); $('#d-inhalt [name="kunde"]').focus(); return; }
+    // Doppelte Projekte verhindern
+    const dopp = doppelte(rec, D.neu, D.orig);
+    if (dopp.hart.length || dopp.weich.length) {
+      const antwort = await doppeltFrage(dopp);
+      if (antwort === 'oeffnen') { schliesseDetail(true); oeffne(dopp.hart[0] || dopp.weich[0]); return; }
+      if (antwort !== 'trotzdem') return;
+    }
     // Ticket / FPJ eingetragen → Schritt automatisch abhaken
     const s = Object.assign({}, rec.schritte);
     if (rec.ticket && !s.ticket) s.ticket = heute();
@@ -968,30 +1014,36 @@
   // ---------------------------------------------------------------
   const ROLLEN = [['admin', 'Admin – alles'], ['bearbeiten', 'Bearbeiten'], ['lesen', 'Nur lesen']];
   async function nutzerDialog() {
-    let liste = [];
-    try { liste = await Q.nutzerListe(); } catch (e) { toast(E.fehlerText(e), 'fehler'); return; }
+    let liste = [], offen = [];
+    try { [liste, offen] = await Promise.all([Q.nutzerListe(), Q.offeneKonten()]); } catch (e) { toast(E.fehlerText(e), 'fehler'); return; }
     const rolleSel = (v, dis) => `<select data-feld="rolle" ${dis ? 'disabled' : ''}>${ROLLEN.map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
     dialog('Nutzer & Rollen', `
-      <p class="klein grau">Neue Kolleg:innen registrieren sich selbst auf der Login-Seite („Registrieren“). Erst wenn ihre E-Mail hier eingetragen ist, sehen sie Daten.</p>
+      <h4 class="nutzer-titel">Warten auf Freischaltung</h4>
+      ${offen.length ? `<table class="mini-tabelle nutzer-tabelle"><tbody>${offen.map(k => `<tr data-offen="${esc(k.email)}">
+          <td class="mono klein">${esc(k.email)}<br><span class="grau">registriert ${esc(new Date(k.registriert_am).toLocaleDateString('de-AT'))}</span></td>
+          <td><input data-feld="name" placeholder="Name"></td>
+          <td>${rolleSel('bearbeiten')}</td>
+          <td><button class="btn btn-primaer" data-freischalten><svg><use href="#i-check"/></svg>Freischalten</button></td></tr>`).join('')}</tbody></table>`
+        : '<p class="klein grau">Niemand. Neue Kolleg:innen registrieren sich zuerst selbst auf der Login-Seite („Registrieren“) und erscheinen dann hier. Bitte nur Personen freischalten, die du kennst.</p>'}
+      <h4 class="nutzer-titel">Freigeschaltet</h4>
       <table class="mini-tabelle nutzer-tabelle"><thead><tr><th>E-Mail</th><th>Name</th><th>Rolle</th><th></th></tr></thead><tbody>
         ${liste.map(n => { const selbst = n.email === S.ich.email; return `<tr data-mail="${esc(n.email)}">
           <td class="mono klein">${esc(n.email)}</td>
           <td><input data-feld="name" value="${esc(n.name)}"></td>
           <td>${rolleSel(n.rolle, selbst)}</td>
           <td>${selbst ? '<span class="grau klein">du</span>' : '<button class="btn btn-leise btn-rund" data-nutzer-weg title="Zugang entfernen"><svg><use href="#i-trash"/></svg></button>'}</td></tr>`; }).join('')}
-        <tr class="neu-zeile"><td><input id="n-mail" type="email" placeholder="name@solpro.at"></td><td><input id="n-name" placeholder="Name"></td>
-          <td>${rolleSel('bearbeiten').replace('data-feld="rolle"', 'id="n-rolle"')}</td>
-          <td><button class="btn btn-primaer btn-rund" id="n-dazu" title="Hinzufügen"><svg><use href="#i-plus"/></svg></button></td></tr>
       </tbody></table>`);
   }
 
   async function nutzerAktion(e) {
     const zeile = e.target.closest('tr[data-mail]');
-    if (e.target.closest('#n-dazu')) {
-      const email = $('#n-mail').value.trim().toLowerCase();
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast('Bitte eine gültige E-Mail eingeben.', 'fehler'); return; }
-      try { await Q.nutzerSpeichern({ email, name: $('#n-name').value.trim(), rolle: $('#n-rolle').value }); toast('Freigegeben.', 'ok'); nutzerDialog(); }
-      catch (err) { toast(E.fehlerText(err), 'fehler'); }
+    const offenZeile = e.target.closest('tr[data-offen]');
+    if (offenZeile && e.target.closest('[data-freischalten]')) {
+      const email = offenZeile.dataset.offen;
+      try {
+        await Q.nutzerSpeichern({ email, name: $('[data-feld="name"]', offenZeile).value.trim(), rolle: $('[data-feld="rolle"]', offenZeile).value });
+        toast(email + ' ist freigeschaltet.', 'ok'); nutzerDialog();
+      } catch (err) { toast(E.fehlerText(err), 'fehler'); }
       return;
     }
     if (zeile && e.target.closest('[data-nutzer-weg]')) {

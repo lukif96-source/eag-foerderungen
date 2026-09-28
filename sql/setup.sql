@@ -1,6 +1,8 @@
 -- EAG-Förderungen SOLPRO – Datenbank-Einrichtung
--- Einmal komplett im Supabase-Dashboard → SQL Editor ausführen.
--- Vorher in der LETZTEN Zeile deine eigene E-Mail-Adresse eintragen (wird Admin).
+-- Läuft im Supabase-Projekt iuxklqcpexoziqxrohwa ("Auslastungstool") neben den Tabellen
+-- der Einsatzplanung. Alles hier heißt foerder_… und berührt deren Tabellen nicht.
+-- Achtung: Das Projekt bestätigt neue Konten automatisch (ohne Mail) – deshalb gilt eine
+-- Freigabe nur für Konten, die VOR der Freischaltung registriert waren (siehe foerder_rolle).
 
 -- ---------------------------------------------------------------
 -- Nutzer & Rollen
@@ -16,11 +18,30 @@ create table if not exists public.foerder_nutzer (
   erstellt_am timestamptz not null default now()
 );
 
+-- Rolle des angemeldeten Kontos. Nur gültig, wenn das Konto schon existierte, als es
+-- freigeschaltet wurde – sonst könnte sich jemand nachträglich mit einer fremden,
+-- bereits freigegebenen E-Mail registrieren (E-Mails werden hier nicht bestätigt).
 create or replace function public.foerder_rolle()
-returns text language sql stable security definer set search_path = public as $$
-  select rolle from public.foerder_nutzer
-  where email = lower(coalesce(auth.jwt() ->> 'email', ''))
+returns text language sql stable security definer set search_path = '' as $$
+  select n.rolle
+  from public.foerder_nutzer n
+  join auth.users u on lower(u.email) = n.email
+  where u.id = auth.uid() and u.created_at <= n.erstellt_am
 $$;
+
+-- Registrierte Konten, die noch nicht freigeschaltet sind (nur für Admins)
+create or replace function public.foerder_offene_konten()
+returns table (email text, registriert_am timestamptz)
+language sql stable security definer set search_path = '' as $$
+  select lower(u.email)::text, u.created_at
+  from auth.users u
+  where public.foerder_rolle() = 'admin'
+    and u.email is not null
+    and not exists (select 1 from public.foerder_nutzer n where n.email = lower(u.email))
+  order by u.created_at desc
+$$;
+revoke all on function public.foerder_offene_konten() from public, anon;
+grant execute on function public.foerder_offene_konten() to authenticated;
 
 create or replace function public.foerder_ich()
 returns text language sql stable security definer set search_path = public as $$
@@ -149,7 +170,8 @@ grant select on public.foerder_verlauf to authenticated;
 drop policy if exists nutzer_lesen on public.foerder_nutzer;
 drop policy if exists nutzer_admin on public.foerder_nutzer;
 create policy nutzer_lesen on public.foerder_nutzer for select to authenticated
-  using (email = lower(coalesce(auth.jwt() ->> 'email', '')) or public.foerder_rolle() = 'admin');
+  using ((email = lower(coalesce(auth.jwt() ->> 'email', '')) and public.foerder_rolle() is not null)
+         or public.foerder_rolle() = 'admin');
 create policy nutzer_admin on public.foerder_nutzer for all to authenticated
   using (public.foerder_rolle() = 'admin') with check (public.foerder_rolle() = 'admin');
 
@@ -171,9 +193,15 @@ drop policy if exists verlauf_lesen on public.foerder_verlauf;
 create policy verlauf_lesen on public.foerder_verlauf for select to authenticated
   using (public.foerder_rolle() is not null);
 
+-- Funktionen nur für angemeldete Nutzer (foerder_funktionsrechte)
+revoke execute on function public.foerder_rolle(), public.foerder_ich(), public.foerder_offene_konten(),
+  public.foerder_stempel(), public.foerder_verlauf_schreiben() from public, anon;
+revoke execute on function public.foerder_stempel(), public.foerder_verlauf_schreiben() from authenticated;
+grant execute on function public.foerder_rolle(), public.foerder_ich(), public.foerder_offene_konten() to authenticated;
+
 -- ---------------------------------------------------------------
--- Ersten Admin eintragen  ← HIER DEINE E-MAIL EINTRAGEN
+-- Erster Admin (Konto existiert bereits)
 -- ---------------------------------------------------------------
 insert into public.foerder_nutzer (email, name, rolle)
-values (lower('DEINE-EMAIL@solpro.at'), 'Lukas', 'admin')
+values ('l.fischereder@solpro.at', 'Lukas', 'admin')
 on conflict (email) do update set rolle = 'admin';

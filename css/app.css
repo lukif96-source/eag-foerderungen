@@ -486,3 +486,10 @@ body.demo .kopf::after { content: "DEMO – keine echten Daten"; position: absol
   .reiter-knopf small { display: none; }
   .warte-tag { order: 5; }
 }
+
+.nutzer-titel { margin: 14px 0 4px; font-size: 14px; }
+.nutzer-titel:first-child { margin-top: 0; }
+
+.doppelt-karte { display: grid; gap: 2px; margin: 10px 0; padding: 10px 12px; border: 1px solid var(--linie); border-left: 4px solid var(--amber); border-radius: 10px; background: #fffdf7; }
+.overlay-frage .panel-inhalt p { margin: 0 0 6px; }
+.overlay-frage .panel-fuss { flex-wrap: wrap; justify-content: flex-end; }
