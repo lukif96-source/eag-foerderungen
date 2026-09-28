@@ -205,3 +205,35 @@ grant execute on function public.foerder_rolle(), public.foerder_ich(), public.f
 insert into public.foerder_nutzer (email, name, rolle)
 values ('l.fischereder@solpro.at', 'Lukas', 'admin')
 on conflict (email) do update set rolle = 'admin';
+
+-- ---------------------------------------------------------------
+-- Mail an die Admins bei neuer Registrierung
+-- Edge Function "foerder-registrierung" (Ordner supabase/functions) verschickt über Resend.
+-- Secrets in Supabase: RESEND_API_KEY (Pflicht), MAIL_ABSENDER (optional)
+-- ---------------------------------------------------------------
+create extension if not exists pg_net;
+
+create table if not exists public.foerder_meldungen (
+  email       text primary key,
+  gemeldet_am timestamptz not null default now()
+);
+alter table public.foerder_meldungen enable row level security;
+revoke all on public.foerder_meldungen from anon, authenticated;
+
+create or replace function public.foerder_registrierung_melden()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  perform net.http_post(
+    url := 'https://iuxklqcpexoziqxrohwa.supabase.co/functions/v1/foerder-registrierung',
+    body := '{}'::jsonb,
+    headers := '{"Content-Type": "application/json"}'::jsonb
+  );
+  return new;
+exception when others then
+  return new; -- Registrierung darf nie an der Mail scheitern
+end $$;
+revoke execute on function public.foerder_registrierung_melden() from public, anon, authenticated;
+
+drop trigger if exists foerder_registrierung on auth.users;
+create trigger foerder_registrierung after insert on auth.users
+  for each row execute function public.foerder_registrierung_melden();

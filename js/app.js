@@ -160,6 +160,22 @@
     $$('[data-recht]').forEach(el => { el.hidden = !darf(el.dataset.recht); });
     zeige('app');
     await laden();
+    await pruefeFreischaltungen();
+    // Link aus der Admin-Mail: direkt die Freischaltung öffnen
+    if (location.hash === '#nutzer' && darf('admin')) {
+      history.replaceState(null, '', location.pathname + location.search);
+      nutzerDialog();
+    }
+  }
+
+  async function pruefeFreischaltungen() {
+    const el = $('#freischalt-hinweis');
+    if (!darf('admin')) { el.hidden = true; return; }
+    try {
+      const offen = await Q.offeneKonten();
+      el.hidden = !offen.length;
+      el.innerHTML = `<svg><use href="#i-users"/></svg><span><b>${offen.length === 1 ? '1 neue Registrierung wartet' : offen.length + ' neue Registrierungen warten'}</b> auf deine Freischaltung</span><span class="freischalt-los">Ansehen</span>`;
+    } catch (e) { el.hidden = true; }
   }
 
   // ---------------------------------------------------------------
@@ -1044,14 +1060,14 @@
       const email = offenZeile.dataset.offen;
       try {
         await Q.nutzerSpeichern({ email, name: $('[data-feld="name"]', offenZeile).value.trim(), rolle: $('[data-feld="rolle"]', offenZeile).value });
-        toast(email + ' ist freigeschaltet.', 'ok'); nutzerDialog();
+        toast(email + ' ist freigeschaltet.', 'ok'); nutzerDialog(); pruefeFreischaltungen();
       } catch (err) { toast(E.fehlerText(err), 'fehler'); }
       return;
     }
     if (zeile && e.target.closest('[data-nutzer-weg]')) {
       const mail = zeile.dataset.mail;
       if (!(await frage(`Zugang für ${mail} entfernen?`, 'Entfernen', true))) return;
-      try { await Q.nutzerLoeschen(mail); nutzerDialog(); } catch (err) { toast(E.fehlerText(err), 'fehler'); }
+      try { await Q.nutzerLoeschen(mail); nutzerDialog(); pruefeFreischaltungen(); } catch (err) { toast(E.fehlerText(err), 'fehler'); }
     }
   }
 

@@ -493,3 +493,8 @@ body.demo .kopf::after { content: "DEMO – keine echten Daten"; position: absol
 .doppelt-karte { display: grid; gap: 2px; margin: 10px 0; padding: 10px 12px; border: 1px solid var(--linie); border-left: 4px solid var(--amber); border-radius: 10px; background: #fffdf7; }
 .overlay-frage .panel-inhalt p { margin: 0 0 6px; }
 .overlay-frage .panel-fuss { flex-wrap: wrap; justify-content: flex-end; }
+
+.freischalt-hinweis { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 16px; border: 1px solid #f0d9a6; background: var(--amber-hell); color: #6e4b06; border-radius: 12px; cursor: pointer; text-align: left; font-size: 14.5px; }
+.freischalt-hinweis:hover { border-color: var(--amber); }
+.freischalt-hinweis svg { color: var(--amber); }
+.freischalt-los { margin-left: auto; font-weight: 600; color: var(--amber); white-space: nowrap; }
