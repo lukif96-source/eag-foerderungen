@@ -1,0 +1,7 @@
+# Niemals Kundendaten ins (öffentliche) Repo!
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+_test/
+.claude/
