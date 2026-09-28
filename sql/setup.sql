@@ -1,8 +1,8 @@
 -- EAG-Förderungen SOLPRO – Datenbank-Einrichtung
--- Läuft im Supabase-Projekt iuxklqcpexoziqxrohwa ("Auslastungstool") neben den Tabellen
--- der Einsatzplanung. Alles hier heißt foerder_… und berührt deren Tabellen nicht.
--- Achtung: Das Projekt bestätigt neue Konten automatisch (ohne Mail) – deshalb gilt eine
--- Freigabe nur für Konten, die VOR der Freischaltung registriert waren (siehe foerder_rolle).
+-- Supabase-Projekt iuxklqcpexoziqxrohwa (im Dashboard "Auslastungstool" genannt).
+-- Die frühere Einsatzplanung wurde dort am 2026-09-28 entfernt; es gibt nur noch foerder_….
+-- Eine Freigabe gilt nur für Konten, die VOR der Freischaltung registriert waren
+-- (siehe foerder_rolle) – Schutz, falls E-Mails einmal nicht bestätigt werden.
 
 -- ---------------------------------------------------------------
 -- Nutzer & Rollen

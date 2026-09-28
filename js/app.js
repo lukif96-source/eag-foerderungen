@@ -120,7 +120,9 @@
         await Q.anmelden(mail, pw);
       } else if (loginModus === 'registrieren') {
         const r = await Q.registrieren(mail, pw);
-        fehler.textContent = 'Konto angelegt. Sobald der Admin dich freischaltet, siehst du die Förderliste.';
+        fehler.textContent = r && r.session
+          ? 'Konto angelegt. Sobald der Admin dich freischaltet, siehst du die Förderliste.'
+          : 'Konto angelegt. Bitte zuerst den Link in der Bestätigungs-Mail anklicken, danach schaltet dich der Admin frei.';
         fehler.classList.add('ok'); fehler.hidden = false;
         setzeLoginModus('anmelden');
         fehler.hidden = false;
