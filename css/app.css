@@ -498,3 +498,24 @@ body.demo .kopf::after { content: "DEMO – keine echten Daten"; position: absol
 .freischalt-hinweis:hover { border-color: var(--amber); }
 .freischalt-hinweis svg { color: var(--amber); }
 .freischalt-los { margin-left: auto; font-weight: 600; color: var(--amber); white-space: nowrap; }
+
+/* Offene Punkte / Daten fehlen */
+.extra-filter { display: flex; gap: 8px; flex-wrap: wrap; margin-top: -4px; }
+.extra-knopf { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--linie); background: var(--flaeche); cursor: pointer; font-size: 14px; color: var(--text); }
+.extra-knopf b { font-size: 17px; font-variant-numeric: tabular-nums; }
+.extra-offen { --akzent: var(--amber); }
+.extra-datenfehlen { --akzent: var(--rot); }
+.extra-knopf svg { color: var(--akzent); }
+.extra-knopf b { color: var(--akzent); }
+.extra-knopf:hover { border-color: var(--akzent); }
+.extra-knopf.aktiv { border: 2px solid var(--akzent); background: color-mix(in srgb, var(--akzent) 8%, #fff); padding: 0 13px; }
+.extra-knopf.leer { opacity: .55; }
+.extra-zu { font-size: 12.5px; color: var(--text-2); margin-left: 4px; }
+.jetzt-punkte { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; margin: -6px 0 16px; border-radius: 12px; background: var(--amber-hell); border: 1px solid #f0d9a6; }
+.jetzt-punkte svg { color: var(--amber); margin-top: 2px; }
+.jetzt-punkte div { flex: 1; display: grid; gap: 2px; }
+.jetzt-punkte b { font-size: 13px; color: #6e4b06; }
+.jetzt-punkte span { white-space: pre-wrap; }
+.nutzer-knoepfe { white-space: nowrap; text-align: right; }
+.nutzer-knoepfe .btn + .btn { margin-left: 6px; }
+@media (max-width: 760px) { .extra-knopf { flex: 1 1 150px; justify-content: center; } .nutzer-knoepfe { white-space: normal; } }

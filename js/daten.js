@@ -149,6 +149,7 @@
       },
       async nutzerListe() { return pruefe(await sb.from('foerder_nutzer').select('*').order('name')); },
       async offeneKonten() { return pruefe(await sb.rpc('foerder_offene_konten')); },
+      async kontoAblehnen(mail) { pruefe(await sb.rpc('foerder_konto_ablehnen', { p_email: mail })); },
       async nutzerSpeichern(n) { return pruefe(await sb.from('foerder_nutzer').upsert(n).select().single()); },
       async nutzerLoeschen(mail) { pruefe(await sb.from('foerder_nutzer').delete().eq('email', mail)); },
       async massenAnlegen(recs) {
@@ -166,6 +167,7 @@
     let nutzer = [ich, { email: 'buero@solpro.at', name: 'Büro', rolle: 'bearbeiten' }];
     let daten = [];
     let verlauf = [];
+    let wartend = [{ email: 'neu@solpro.at', registriert_am: jetzt() }];
     const kopie = o => JSON.parse(JSON.stringify(o));
     const neuId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
     function beispiel() {
@@ -223,8 +225,9 @@
       async loeschen(id) { daten = daten.filter(d => d.id !== id); },
       async verlauf(id) { return kopie(verlauf.filter(v => v.foerderung_id === id)); },
       async nutzerListe() { return kopie(nutzer); },
-      async offeneKonten() { return [{ email: 'neu@solpro.at', registriert_am: jetzt() }]; },
-      async nutzerSpeichern(n) { nutzer = nutzer.filter(x => x.email !== n.email).concat([n]); return kopie(n); },
+      async offeneKonten() { return kopie(wartend); },
+      async kontoAblehnen(mail) { wartend = wartend.filter(k => k.email !== mail); },
+      async nutzerSpeichern(n) { nutzer = nutzer.filter(x => x.email !== n.email).concat([n]); wartend = wartend.filter(k => k.email !== n.email); return kopie(n); },
       async nutzerLoeschen(mail) { nutzer = nutzer.filter(x => x.email !== mail); },
       async massenAnlegen(recs) { const out = []; for (const r of recs) out.push(await this.anlegen(r)); return out; }
     };

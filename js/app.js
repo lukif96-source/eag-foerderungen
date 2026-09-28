@@ -57,6 +57,7 @@
     filter: Object.assign({ suche: '', jahr: String(new Date().getFullYear()), call: '', art: '', mitarbeiter: '', zieher: '', papierkorb: false, schritt: '' }, speicherLokal.lesen('filter', {})),
     sort: speicherLokal.lesen('sort', { k: 'call', auf: true }),
     detail: null, geladenUm: 0,
+    extra: '',
     ansicht: ['offen', 'fertig', 'alle'].includes(speicherLokal.lesen('ansicht', 'offen')) ? speicherLokal.lesen('ansicht', 'offen') : 'offen', aufgeklappt: new Set()
   };
   S.filter.suche = '';
@@ -259,9 +260,25 @@
     return st.fertig ? 'fertig' : 'offen';
   }
 
+  const hatOffenePunkte = x => !!(x.d.offene_punkte || '').trim();
+  const fehltDaten = x => E.fehlendeDaten(x.d).length > 0 && x.st.hoechster < 2;
+  function passtExtra(x) {
+    if (S.extra === 'offen') return hatOffenePunkte(x);
+    if (S.extra === 'datenfehlen') return fehltDaten(x);
+    return true;
+  }
+
   function aktuelleListe() {
     return S.daten.filter(passtBasis).map(d => ({ d, st: E.status(d) }))
-      .filter(x => S.ansicht === 'alle' || kategorie(x.st) === S.ansicht);
+      .filter(x => S.ansicht === 'alle' || kategorie(x.st) === S.ansicht).filter(passtExtra);
+  }
+
+  function zeichneExtra(liste) {
+    const n = { offen: liste.filter(hatOffenePunkte).length, datenfehlen: liste.filter(fehltDaten).length };
+    if (S.extra && !n[S.extra]) S.extra = '';
+    const k = (key, titel, icon) => `<button class="extra-knopf extra-${key} ${S.extra === key ? 'aktiv' : ''} ${n[key] ? '' : 'leer'}" data-extra="${key}">
+      <svg><use href="#${icon}"/></svg><b>${n[key]}</b><span>${titel}</span>${S.extra === key ? '<span class="extra-zu">alle anzeigen ✕</span>' : ''}</button>`;
+    $('#extra-filter').innerHTML = k('offen', 'Offene Punkte', 'i-flag') + k('datenfehlen', 'Daten fehlen noch', 'i-alert');
   }
 
   // ---------------------------------------------------------------
@@ -270,7 +287,9 @@
   function zeichne() {
     const basis = S.daten.filter(passtBasis).map(d => ({ d, st: E.status(d) }));
     zeichneReiter(basis);
-    const liste = basis.filter(x => S.ansicht === 'alle' || kategorie(x.st) === S.ansicht);
+    const inAnsicht = basis.filter(x => S.ansicht === 'alle' || kategorie(x.st) === S.ansicht);
+    zeichneExtra(inAnsicht);
+    const liste = inAnsicht.filter(passtExtra);
     if (S.ansicht === 'alle') zeichneListe(sortiere(liste), basis.length);
     else zeichneGruppen(liste);
     const f = S.filter;
@@ -331,7 +350,7 @@
       $('#liste').innerHTML = `<div class="leer-hinweis">${darf('admin') ? 'Noch keine Kunden. Oben auf „Neuer Kunde“ klicken oder die Excel-Liste importieren.' : 'Noch keine Kunden erfasst.'}</div>`;
       return;
     }
-    const suche = !!S.filter.suche;
+    const suche = !!S.filter.suche || !!S.extra;
     const zeigen = suche ? 999 : 6;
     const keys = S.ansicht === 'fertig' ? ['fertig'] : SCHRITTE.map(x => x.key);
 
@@ -364,7 +383,7 @@
         </div>
       </section>`;
     }).join('');
-    $('#liste').innerHTML = leiste + (gruppenHtml.trim() ? gruppenHtml : `<div class="leer-hinweis">${suche ? 'Kein Kunde gefunden.' : 'Noch keine Förderung ausgezahlt.'}</div>`);
+    $('#liste').innerHTML = leiste + (gruppenHtml.trim() ? gruppenHtml : `<div class="leer-hinweis">${suche ? (S.extra ? 'Keine Kunden mit diesem Filter.' : 'Kein Kunde gefunden.') : 'Noch keine Förderung ausgezahlt.'}</div>`);
   }
 
   function fortschritt(d, st) {
@@ -491,6 +510,12 @@
   }
 
   function jetztHtml(rec, nurLesen, neu) {
+    const punkte = (rec.offene_punkte || '').trim();
+    const punkteHtml = !neu && punkte ? `<div class="jetzt-punkte"><svg><use href="#i-flag"/></svg><div><b>Offene Punkte</b><span>${esc(punkte)}</span></div><button class="btn btn-leise" data-zu-punkten>Bearbeiten</button></div>` : '';
+    return jetztKasten(rec, nurLesen, neu) + punkteHtml;
+  }
+
+  function jetztKasten(rec, nurLesen, neu) {
     if (neu) return '<div class="jetzt jetzt-neu"><div class="jetzt-text"><small>Neuer Kunde</small><b>Daten eintragen und speichern</b></div></div>';
     const st = E.status(rec);
     if (st.fertig) return '<div class="jetzt jetzt-fertig"><div class="jetzt-text"><small>Stand</small><b>Komplett erledigt – ausgezahlt</b></div></div>';
@@ -586,6 +611,7 @@
       ablaufNeu();
     } else if (el.name) {
       rec[el.name] = formWert(el);
+      if (el.name === 'offene_punkte' && e.type === 'change') $('#d-jetzt').innerHTML = jetztHtml(rec, false, S.detail.neu);
       if (['kunde', 'strasse', 'plz', 'ort', 'zaehlpunkt', 'mail', 'kwp', 'speicher', 'art', 'zieher'].includes(el.name) && e.type === 'change') {
         ablaufNeu();
       }
@@ -1041,7 +1067,7 @@
           <td class="mono klein">${esc(k.email)}<br><span class="grau">registriert ${esc(new Date(k.registriert_am).toLocaleDateString('de-AT'))}</span></td>
           <td><input data-feld="name" placeholder="Name"></td>
           <td>${rolleSel('bearbeiten')}</td>
-          <td><button class="btn btn-primaer" data-freischalten><svg><use href="#i-check"/></svg>Freischalten</button></td></tr>`).join('')}</tbody></table>`
+          <td class="nutzer-knoepfe"><button class="btn btn-gefahr-leise" data-ablehnen><svg><use href="#i-close"/></svg>Ablehnen</button><button class="btn btn-primaer" data-freischalten><svg><use href="#i-check"/></svg>Freischalten</button></td></tr>`).join('')}</tbody></table>`
         : '<p class="klein grau">Niemand. Neue Kolleg:innen registrieren sich zuerst selbst auf der Login-Seite („Registrieren“) und erscheinen dann hier. Bitte nur Personen freischalten, die du kennst.</p>'}
       <h4 class="nutzer-titel">Freigeschaltet</h4>
       <table class="mini-tabelle nutzer-tabelle"><thead><tr><th>E-Mail</th><th>Name</th><th>Rolle</th><th></th></tr></thead><tbody>
@@ -1056,6 +1082,13 @@
   async function nutzerAktion(e) {
     const zeile = e.target.closest('tr[data-mail]');
     const offenZeile = e.target.closest('tr[data-offen]');
+    if (offenZeile && e.target.closest('[data-ablehnen]')) {
+      const email = offenZeile.dataset.offen;
+      if (!(await frage(`Registrierung von ${email} ablehnen? Das Konto wird gelöscht.`, 'Ablehnen', true))) return;
+      try { await Q.kontoAblehnen(email); toast(email + ' wurde abgelehnt.', 'ok'); nutzerDialog(); pruefeFreischaltungen(); }
+      catch (err) { toast(E.fehlerText(err), 'fehler'); }
+      return;
+    }
     if (offenZeile && e.target.closest('[data-freischalten]')) {
       const email = offenZeile.dataset.offen;
       try {
@@ -1126,6 +1159,13 @@
     });
     $('#nutzer-btn').addEventListener('click', e => { e.stopPropagation(); $('#nutzer-menue').hidden = !$('#nutzer-menue').hidden; });
 
+    $('#extra-filter').addEventListener('click', e => {
+      const b = e.target.closest('[data-extra]');
+      if (!b) return;
+      S.extra = S.extra === b.dataset.extra ? '' : b.dataset.extra;
+      S.aufgeklappt.clear();
+      zeichne();
+    });
     $('#reiter').addEventListener('click', e => {
       const b = e.target.closest('[data-ansicht]');
       if (!b) return;
@@ -1160,6 +1200,11 @@
     $('#d-inhalt').addEventListener('change', aufFormEingabe);
     $('#d-speichern').addEventListener('click', speichern);
     $('#d-inhalt').addEventListener('click', e => {
+      if (e.target.closest('[data-zu-punkten]')) {
+        const f = $('#d-inhalt [name="offene_punkte"]');
+        f.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => f.focus(), 300);
+        return;
+      }
       const b = e.target.closest('[data-jetzt]');
       if (!b || !S.detail) return;
       S.detail.rec.schritte = Object.assign({}, S.detail.rec.schritte, { [b.dataset.jetzt]: heute() });

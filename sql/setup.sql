@@ -237,3 +237,19 @@ revoke execute on function public.foerder_registrierung_melden() from public, an
 drop trigger if exists foerder_registrierung on auth.users;
 create trigger foerder_registrierung after insert on auth.users
   for each row execute function public.foerder_registrierung_melden();
+
+-- Admin lehnt eine Registrierung ab: Konto wird gelöscht (nur nicht freigeschaltete Konten)
+create or replace function public.foerder_konto_ablehnen(p_email text)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if public.foerder_rolle() is distinct from 'admin' then
+    raise exception 'Nur Admins dürfen Registrierungen ablehnen';
+  end if;
+  if exists (select 1 from public.foerder_nutzer where email = lower(p_email)) then
+    raise exception 'Dieses Konto ist freigeschaltet – zuerst den Zugang entfernen';
+  end if;
+  delete from auth.users where lower(email) = lower(p_email);
+  delete from public.foerder_meldungen where email = lower(p_email);
+end $$;
+revoke execute on function public.foerder_konto_ablehnen(text) from public, anon;
+grant execute on function public.foerder_konto_ablehnen(text) to authenticated;
