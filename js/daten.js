@@ -2,86 +2,8 @@
 (function () {
   'use strict';
 
-  // ---------------------------------------------------------------
-  // Ablauf einer Förderung. auto = wird aus den Daten abgeleitet.
-  // ---------------------------------------------------------------
-  const SCHRITTE = [
-    { key: 'daten',             label: 'Daten erfasst',              todo: 'Daten erfassen', knopf: 'Ergänzen', kurz: 'Daten',            auto: true },
-    { key: 'aufgeteilt',        label: 'Aufgeteilt',                  todo: 'Aufteilen', knopf: 'Zuteilen', kurz: 'Aufgeteilt',       auto: true },
-    { key: 'ticket',            label: 'Ticket gezogen',              todo: 'Ticket ziehen', knopf: 'Ticket gezogen', kurz: 'Ticket' },
-    { key: 'projekt',           label: 'Projekt angelegt',            todo: 'Projekt anlegen', knopf: 'Projekt angelegt', kurz: 'Projekt' },
-    { key: 'eingereicht',       label: 'Im Portal eingereicht',       todo: 'Im Portal einreichen', knopf: 'Eingereicht', kurz: 'Eingereicht' },
-    { key: 'vertrag_erhalten',  label: 'Fördervertrag erhalten',      todo: 'Fördervertrag abwarten', knopf: 'Vertrag erhalten', warten: 'Warten auf Fördervertrag', kurz: 'Vertrag da' },
-    { key: 'vertrag_versendet', label: 'Vertrag an Kunden versendet', todo: 'Vertrag versenden', knopf: 'Versendet', kurz: 'Vertrag versendet' },
-    { key: 'rechnung',          label: 'Rechnung hochgeladen',        todo: 'Rechnung hochladen', knopf: 'Hochgeladen', kurz: 'Rechnung' },
-    { key: 'zahlung',           label: 'Zahlung hochgeladen',         todo: 'Zahlung hochladen', knopf: 'Hochgeladen', kurz: 'Zahlung' },
-    { key: 'abgeschlossen',     label: 'Abgeschlossen',               todo: 'Abschließen', knopf: 'Abgeschlossen', kurz: 'Abgeschlossen' },
-    { key: 'ausgezahlt',        label: 'Ausgezahlt',                  todo: 'Auszahlung abwarten', knopf: 'Ausgezahlt', warten: 'Warten auf Auszahlung', kurz: 'Ausgezahlt' }
-  ];
-
-  // Was vor dem Ticket-Ziehen vorhanden sein muss
-  const PFLICHT = [
-    ['kunde', 'Kunde'], ['strasse', 'Straße'], ['plz', 'PLZ'], ['ort', 'Ort'],
-    ['zaehlpunkt', 'Zählpunkt'], ['mail', 'Mail']
-  ];
-
-  const FELDER = [
-    'jahr', 'programm', 'art', 'foerdercall', 'mitarbeiter', 'zieher', 'kunde', 'geburtsdatum', 'vollmacht',
-    'strasse', 'plz', 'ort', 'kg_gst', 'zaehlpunkt', 'mail', 'projekt_nr', 'kwp', 'modulflaeche', 'einspeisung',
-    'wr_leistung', 'speicher', 'anbringung', 'zeitplan', 'ticket', 'fpj', 'schritte', 'offene_punkte', 'info'
-  ];
-
-  function leer(v) { return v === null || v === undefined || (typeof v === 'string' && v.trim() === ''); }
-
-  function fehlendeDaten(f) {
-    const fehlt = PFLICHT.filter(([k]) => leer(f[k])).map(([, l]) => l);
-    const nurSpeicher = /^speicher$/i.test((f.art || '').trim());
-    if (nurSpeicher) { if (leer(f.speicher)) fehlt.push('Speicher'); }
-    else if (leer(f.kwp)) fehlt.push('kWp');
-    return fehlt;
-  }
-
-  function schrittWert(f, key) {
-    if (key === 'daten') return fehlendeDaten(f).length === 0 ? '✓' : '';
-    if (key === 'aufgeteilt') return leer(f.zieher) ? '' : '✓';
-    const v = (f.schritte || {})[key];
-    return leer(v) ? '' : v;
-  }
-
-  // Status: höchster erledigter Schritt; "nächster" = erster offener Schritt danach
-  function status(f) {
-    const erledigt = SCHRITTE.map(s => !!schrittWert(f, s.key));
-    const hoechster = erledigt.lastIndexOf(true);
-    let naechster = -1;
-    for (let i = hoechster + 1; i < SCHRITTE.length; i++) if (!erledigt[i]) { naechster = i; break; }
-    const luecken = [];
-    for (let i = 0; i < hoechster; i++) if (!erledigt[i] && !SCHRITTE[i].auto) luecken.push(i);
-    return { erledigt, hoechster, naechster, luecken, fertig: naechster === -1 };
-  }
-
-  // ---------------------------------------------------------------
-  // Hilfen zum Vergleichen (Import / Duplikate)
-  // ---------------------------------------------------------------
-  const TITEL = new Set(['dr', 'ing', 'mag', 'bsc', 'msc', 'dipl', 'med', 'univ', 'ma', 'mba', 'di', 'prof', 'und', 'erweiterung', 'weg', 'z.h']);
-  function nameTokens(s) {
-    return (s || '').toLowerCase()
-      .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
-      .split(/[^a-z]+/).filter(t => t.length >= 3 && !TITEL.has(t));
-  }
-  function zpNorm(s) { return (s || '').toString().replace(/[^0-9A-Za-z]/g, '').replace(/^AT/i, '').toUpperCase(); }
-
-  function gleicherKunde(a, b) {
-    const ta = nameTokens(a.kunde), tb = new Set(nameTokens(b.kunde));
-    const gemeinsam = ta.filter(t => tb.has(t)).length;
-    const za = zpNorm(a.zaehlpunkt), zb = zpNorm(b.zaehlpunkt);
-    const erwA = /erweiterung/i.test(a.kunde || ''), erwB = /erweiterung/i.test(b.kunde || '');
-    if (erwA !== erwB) return false;
-    const gleicheNr = (a.fpj && a.fpj === b.fpj) || (a.projekt_nr && a.projekt_nr.replace(/\s/g, '') === (b.projekt_nr || '').replace(/\s/g, ''));
-    if (gleicheNr && gemeinsam >= 1) return true;
-    if (za.length >= 20 && zb.length >= 20) return za === zb && gemeinsam >= 1;
-    if (!ta.length || !tb.size) return false;
-    return gemeinsam >= Math.min(2, ta.length, tb.size);
-  }
+  // Schritte, Status, Fristen und Prüfungen stehen in js/ablauf.js (getestet)
+  const A = window.EAG_ABLAUF;
 
   // ---------------------------------------------------------------
   // Datenzugriff
@@ -171,27 +93,43 @@
     const kopie = o => JSON.parse(JSON.stringify(o));
     const neuId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
     function beispiel() {
+      const h = A.heuteText(), t = n => A.plusTage(h, n), m = n => A.plusMonate(h, n);
+      const call = A.offenerCall(h) || A.LETZTER_CALL;
       const orte = [['Gmunden', '4810'], ['Bad Ischl', '4820'], ['Ebensee', '4802'], ['Vöcklabruck', '4840'], ['Lenzing', '4860'], ['Scharnstein', '4644']];
-      const namen = ['Muster Max', 'Beispiel Anna', 'Test Franz', 'Probe Maria', 'Demo Karl', 'Sonne Eva', 'Dach Peter', 'Strom Julia', 'Licht Georg', 'Wald Sabine', 'Berg Michael', 'See Petra'];
+      // [Name, Call, kWp, Speicher, Schritte, Extras]
+      const faelle = [
+        ['Muster Max', call, 9.9, '18 kWh', {}, { zaehlpunkt: '' }],
+        ['Beispiel Anna', call, 12.4, '15 kWh', {}, { zieher: '' }],
+        ['Test Franz', call, 8.6, '9 kWh', {}, {}],
+        ['Probe Maria', call, 14.3, '18 kWh', { projekt: t(-20) }, { fpj: 'FPJ00140001' }],
+        ['Demo Karl', call, 22.1, '27 kWh', { projekt: t(-20) }, { fpj: 'FPJ00140002', offene_punkte: 'Kategorie C: Gebot festlegen' }],
+        ['Sonne Eva', '2026-06-16', 11.2, '18 kWh', { projekt: '2026-06-02', abgelehnt: '2026-07-08' }, { fpj: 'FPJ00113001', zaehlpunkt: '0030000000000000000000000004711' }],
+        ['Dach Peter', call, 10.6, '18 kWh', { projekt: '2026-06-03', frueher_abgelehnt: '2026-06-16' }, { fpj: 'FPJ00113002' }],
+        ['Strom Julia', '2026-06-16', 13.1, '18 kWh', { projekt: '2026-06-05', ticket: '2026-06-16', eingereicht: '2026-06-18' }, { fpj: 'FPJ00113003', ticket: 'a91f3c' }],
+        ['Licht Georg', '2026-06-16', 9.2, '12 kWh', { projekt: '2026-06-05', ticket: '2026-06-16', eingereicht: '2026-06-17', nachforderung: t(-20) }, { fpj: 'FPJ00113004', ticket: 'b20e11', offene_punkte: 'Vollmacht neu unterschreiben lassen' }],
+        ['Wald Sabine', '2026-04-23', 15.4, '18 kWh', { projekt: '✓', ticket: '2026-04-23', eingereicht: '2026-04-24', vertrag_erhalten: m(-6).slice(0, 8) + '05' }, { fpj: 'FPJ00100005', ticket: 'c11a07' }],
+        ['Berg Michael', '2026-04-23', 7.8, '9 kWh', { projekt: '✓', ticket: '2026-04-23', eingereicht: '2026-04-24', vertrag_erhalten: t(-150), vertrag_versendet: t(-140) }, { fpj: 'FPJ00100006', ticket: 'c11a08' }],
+        ['See Petra', '2026-04-23', 18.9, '27 kWh', { projekt: '✓', ticket: '✓', eingereicht: '✓', vertrag_erhalten: '✓', vertrag_versendet: '✓' }, { fpj: 'FPJ00100007', ticket: 'c11a09' }],
+        ['Feld Hans', '2026-04-23', 10.1, '15 kWh', { projekt: '✓', ticket: '2026-04-23', eingereicht: '2026-04-24', vertrag_erhalten: '2026-05-20', vertrag_versendet: '2026-05-22', inbetriebnahme: '2026-09-10' }, { fpj: 'FPJ00100008', ticket: 'c11a10' }],
+        ['Bach Lisa', '2026-04-23', 6.4, '9 kWh', { projekt: '✓', ticket: '2026-04-23', eingereicht: '2026-04-24', vertrag_erhalten: '2026-05-15', vertrag_versendet: '2026-05-18', inbetriebnahme: '2026-08-01', herkunftsnachweis: '2026-08-12', rechnung: '2026-08-20' }, { fpj: 'FPJ00100009', ticket: 'c11a11' }],
+        ['Hof Martin', '2026-04-23', 16.0, '18 kWh', { projekt: '✓', ticket: '2026-04-23', eingereicht: '2026-04-24', vertrag_erhalten: '2026-05-12', vertrag_versendet: '2026-05-14', inbetriebnahme: '2026-07-20', herkunftsnachweis: '2026-07-28', rechnung: '2026-08-02', zahlung: '2026-08-02', abgeschlossen: '2026-08-05' }, { fpj: 'FPJ00100010', ticket: 'c11a12' }],
+        ['Wiese Clara', '2025-10-08', 11.8, '15 kWh', Object.assign(Object.fromEntries(A.SCHRITTE.filter(s => !s.auto).map(s => [s.key, '✓'])), { ausgezahlt: '2026-02-11' }), { fpj: 'FPJ00090011', ticket: 'd00b01' }],
+        ['Tal Robert', '2026-06-16', 9.0, '9 kWh', { projekt: '2026-06-04', zurueckgezogen: '2026-06-12' }, { fpj: 'FPJ00113012', info: 'Kunde hat storniert' }]
+      ];
       const vk = ['Manfred', 'Patrick', 'Thomas', 'Hermann'];
-      const zi = ['Verena', 'Bianca', 'Thomas', 'Marion', ''];
-      namen.forEach((n, i) => {
+      const zi = ['Verena', 'Bianca', 'Thomas', 'Marion'];
+      faelle.forEach(([n, c, kwp, sp, s, x], i) => {
         const [ort, plz] = orte[i % orte.length];
-        const s = {};
-        const stufe = i % 11;
-        const keys = ['ticket', 'projekt', 'eingereicht', 'vertrag_erhalten', 'vertrag_versendet', 'rechnung', 'zahlung', 'abgeschlossen', 'ausgezahlt'];
-        keys.slice(0, Math.max(0, stufe - 2)).forEach((k, j) => { s[k] = '2026-0' + (6 + Math.min(3, Math.floor(j / 3))) + '-1' + j; });
-        daten.push({
-          id: neuId(), jahr: 2026, programm: 'EAG', art: i % 5 === 4 ? 'Speicher' : 'PV + Speicher',
-          foerdercall: i < 8 ? '2026-06-16' : '2026-10-08', mitarbeiter: vk[i % vk.length], zieher: stufe >= 1 ? zi[i % zi.length] : '',
+        daten.push(Object.assign({
+          id: neuId(), jahr: +String(c).slice(0, 4), programm: 'EAG', art: 'PV + Speicher',
+          foerdercall: c, mitarbeiter: vk[i % vk.length], zieher: zi[i % zi.length],
           kunde: n, geburtsdatum: '1970-0' + (1 + i % 9) + '-15', vollmacht: 'Nein', strasse: 'Musterweg ' + (i + 1), plz, ort,
-          kg_gst: '', zaehlpunkt: i % 6 === 5 ? '' : 'AT00300000000000000000000301' + String(10000 + i * 37).slice(0, 5), mail: i % 7 === 6 ? '' : 'kunde' + i + '@example.at',
-          projekt_nr: 'P26' + String(100 + i).padStart(4, '0'), kwp: 8 + i * 0.75, modulflaeche: 40 + i * 3, einspeisung: 'Überschuss',
-          wr_leistung: '10 kW', speicher: '18 kWh', anbringung: 'Dach', zeitplan: ['März', 'April', 'Mai'][i % 3],
-          ticket: stufe >= 3 ? 'a' + (1000 + i).toString(16) : '', fpj: stufe >= 4 ? 'FPJ0011' + (3000 + i) : '', schritte: s,
-          offene_punkte: i % 4 === 1 ? 'Vollmacht fehlt noch' : '', info: '', geloescht_am: null,
+          kg_gst: '', zaehlpunkt: 'AT00300000000000000000000301' + String(10000 + i * 37).slice(0, 5), mail: 'kunde' + i + '@example.at',
+          projekt_nr: 'P26' + String(100 + i).padStart(4, '0'), kwp, modulflaeche: Math.round(kwp * 4.9), einspeisung: 'Überschuss',
+          wr_leistung: Math.ceil(kwp) + ' kW', speicher: sp, anbringung: 'Dach', zeitplan: '',
+          ticket: '', fpj: '', schritte: s, offene_punkte: '', info: '', geloescht_am: null,
           erstellt_am: jetzt(), erstellt_von: 'Demo', geaendert_am: jetzt(), geaendert_von: 'Demo'
-        });
+        }, x));
       });
     }
     beispiel();
@@ -233,8 +171,8 @@
     };
   }
 
-  window.EAG = {
-    SCHRITTE, PFLICHT, FELDER, leer, fehlendeDaten, schrittWert, status, nameTokens, zpNorm, gleicherKunde, fehlerText,
+  window.EAG = Object.assign({}, A, {
+    fehlerText,
     quelle: /[?&]demo\b/.test(location.search) ? demoQuelle() : supabaseQuelle()
-  };
+  });
 })();

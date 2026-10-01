@@ -18,6 +18,28 @@ Offen im Supabase-Dashboard:
 
 Danach: anmelden → **Excel-Import** → bisherige Liste auswählen.
 
+## Ablauf: 13 Schritte in 5 Phasen
+
+| Phase | Schritte | Frist |
+|---|---|---|
+| Vorbereitung | Daten erfasst · Aufgeteilt · Projekt im EAG-Portal angelegt | – |
+| Call | Ticket gezogen · Antrag eingereicht | Ticket nur am 1. Calltag ab 17:00 · Antrag bis Callende |
+| Zusage | Fördervertrag erhalten (**mit Datum**) · Vertrag an Kunden versendet | Nachforderung: 4 Wochen |
+| Umsetzung | In Betrieb genommen (Fertigstellungsmeldung) · Bei der E-Control registriert | 6 Monate ab Vertrag, über 100 kWp 12 |
+| Abrechnung | Rechnung · Zahlung · Endabrechnung eingereicht · Ausgezahlt | Endabrechnung 6 Monate nach der Inbetriebnahme-Frist |
+
+Nebenschritte: Nachforderung / nachgereicht, Frist verlängert bis. Ende ohne Auszahlung: abgelehnt,
+zurückgezogen, Zusage erloschen. **Abgelehnt → „Neu ansuchen“** setzt Ticket und Einreichung zurück,
+behält das Portal-Projekt und merkt sich den alten Call – solange noch ein Call offen ist.
+Laut SOLPRO ist der Call vom 8.–22.10.2026 der letzte; 2027 gibt es keinen.
+
+Die Regeln stehen an **einer** Stelle: `js/ablauf.js` (ohne Seite, ohne Datenbank), getestet mit
+`node --test` (läuft auch bei jedem Push auf GitHub). Fristen werden berechnet, nie gespeichert.
+Ohne Vertragsdatum ist eine Frist „unbekannt“ und steht rot ganz oben – mit dem frühestmöglichen Datum.
+
+Excel-Import: orange-rot markierte Zeilen (abgelehnt) kommen direkt in den offenen Call;
+schon importierte Einträge werden beim erneuten Import einmalig umgestellt.
+
 ## Rollen
 | Rolle | darf |
 |---|---|

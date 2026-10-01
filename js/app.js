@@ -3,6 +3,11 @@
   const E = window.EAG;
   const Q = E.quelle;
   const { SCHRITTE } = E;
+  // Bezeichnung jedes Schlüssels in "schritte" (Hauptschritte, Ende, Nebenschritte)
+  const ALLE_LABEL = Object.assign({}, ...SCHRITTE.map(x => ({ [x.key]: x.label })), ...E.ENDE.map(x => ({ [x.key]: x.label })), E.NEBEN);
+  // Gruppen der Übersicht: jeder Schritt, dazu "Unterlagen nachreichen" vor dem Warten auf den Vertrag
+  const GRUPPEN = SCHRITTE.flatMap(x => x.key === 'vertrag_erhalten'
+    ? [{ key: 'nachgereicht', todo: 'Unterlagen nachreichen', kurz: 'Nachreichen', phase: 'call', neben: true }, x] : [x]);
 
   const $ = (s, el) => (el || document).querySelector(s);
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
@@ -58,7 +63,7 @@
     sort: speicherLokal.lesen('sort', { k: 'call', auf: true }),
     detail: null, geladenUm: 0,
     extra: '',
-    ansicht: ['offen', 'fertig', 'alle'].includes(speicherLokal.lesen('ansicht', 'offen')) ? speicherLokal.lesen('ansicht', 'offen') : 'offen', aufgeklappt: new Set()
+    ansicht: ['offen', 'fertig', 'beendet', 'alle'].includes(speicherLokal.lesen('ansicht', 'offen')) ? speicherLokal.lesen('ansicht', 'offen') : 'offen', aufgeklappt: new Set()
   };
   S.filter.suche = '';
   S.filter.papierkorb = false;
@@ -243,7 +248,8 @@
         case 'mitarbeiter': return (x.d.mitarbeiter || '').toLowerCase();
         case 'zieher': return (x.d.zieher || '').toLowerCase();
         case 'kwp': return x.d.kwp || 0;
-        case 'status': return x.st.fertig ? 99 : x.st.naechster;
+        case 'status': return x.st.fertig ? 99 : x.st.ende ? 98 : x.st.naechster;
+        case 'frist': { const fr = E.fristen(x.d, heute())[0]; return fr ? (fr.datum || '0000') : '9999'; }
         case 'geaendert': return x.d.geaendert_am || '';
         default: return (x.d.foerdercall || '9999') + (x.d.kunde || '').toLowerCase();
       }
@@ -257,12 +263,14 @@
 
   // Ansicht: "todo" = wir sind dran, "warten" = Förderstelle/Kunde ist dran, "fertig", "alle"
   function kategorie(st) {
-    return st.fertig ? 'fertig' : 'offen';
+    return st.ende ? 'beendet' : st.fertig ? 'fertig' : 'offen';
   }
 
   const hatOffenePunkte = x => !!(x.d.offene_punkte || '').trim();
-  const fehltDaten = x => E.fehlendeDaten(x.d).length > 0 && x.st.hoechster < 2;
+  const fehltDaten = x => E.fehlendeDaten(x.d).length > 0 && x.st.hoechster < E.IDX.ticket && !x.st.ende;
+  const fristBald = x => { const fr = E.fristen(x.d, heute())[0]; return !!fr && fr.stufe !== 'ruhig'; };
   function passtExtra(x) {
+    if (S.extra === 'frist') return fristBald(x);
     if (S.extra === 'offen') return hatOffenePunkte(x);
     if (S.extra === 'datenfehlen') return fehltDaten(x);
     return true;
@@ -274,11 +282,11 @@
   }
 
   function zeichneExtra(liste) {
-    const n = { offen: liste.filter(hatOffenePunkte).length, datenfehlen: liste.filter(fehltDaten).length };
+    const n = { frist: liste.filter(fristBald).length, offen: liste.filter(hatOffenePunkte).length, datenfehlen: liste.filter(fehltDaten).length };
     if (S.extra && !n[S.extra]) S.extra = '';
     const k = (key, titel, icon) => `<button class="extra-knopf extra-${key} ${S.extra === key ? 'aktiv' : ''} ${n[key] ? '' : 'leer'}" data-extra="${key}">
       <svg><use href="#${icon}"/></svg><b>${n[key]}</b><span>${titel}</span>${S.extra === key ? '<span class="extra-zu">alle anzeigen ✕</span>' : ''}</button>`;
-    $('#extra-filter').innerHTML = k('offen', 'Offene Punkte', 'i-flag') + k('datenfehlen', 'Daten fehlen noch', 'i-alert');
+    $('#extra-filter').innerHTML = k('frist', 'Fristen in 30 Tagen', 'i-history') + k('offen', 'Offene Punkte', 'i-flag') + k('datenfehlen', 'Daten fehlen noch', 'i-alert');
   }
 
   // ---------------------------------------------------------------
@@ -302,46 +310,62 @@
   }
 
   function zeichneReiter(basis) {
-    const n = { offen: 0, fertig: 0, alle: basis.length };
+    const n = { offen: 0, fertig: 0, beendet: 0, alle: basis.length };
     basis.forEach(x => { n[kategorie(x.st)]++; });
     const r = (k, titel, sub) => `<button class="reiter-knopf ${S.ansicht === k ? 'aktiv' : ''}" data-ansicht="${k}">
       <b>${n[k]}</b><span>${titel}</span><small>${sub}</small></button>`;
-    $('#reiter').innerHTML = r('offen', 'Offen', 'noch nicht ausgezahlt') + r('fertig', 'Fertig', 'ausgezahlt') + r('alle', 'Alle', 'komplette Liste');
+    $('#reiter').innerHTML = r('offen', 'Offen', 'noch nicht ausgezahlt') + r('fertig', 'Fertig', 'ausgezahlt') + r('beendet', 'Beendet', 'abgelehnt, zurückgezogen') + r('alle', 'Alle', 'komplette Liste');
   }
 
+  // Frist als kleines Etikett; lang = mit Resttagen
+  function fristBadge(fr, lang) {
+    if (!fr) return '';
+    const wann = fr.datum ? datumDE(fr.datum) : 'unbekannt';
+    const rest = fr.tage === null ? '' : fr.tage < 0 ? ` · ${-fr.tage} Tage überfällig` : fr.tage === 0 ? ' · heute' : ` · noch ${fr.tage} Tage`;
+    return `<span class="frist frist-${fr.stufe}" title="${esc(fr.hinweis)}"><svg><use href="#i-history"/></svg>${esc(fr.label)}: ${esc(wann)}${lang ? esc(rest) : ''}</span>`;
+  }
+  const callsText = v => String(v || '').split(',').map(x => datumDE(x.trim())).filter(Boolean).join(', ');
+
   function zeileHtml(d, st, bearbeiten) {
-    const n = st.naechster >= 0 ? SCHRITTE[st.naechster] : null;
+    const n = E.aufgabe(d, st);
     const fehlt = E.fehlendeDaten(d);
+    const fr = E.fristen(d, heute())[0];
+    const s = d.schritte || {};
     const info = [[d.plz, d.ort].filter(Boolean).join(' '), d.foerdercall ? 'Call ' + datumDE(d.foerdercall) : '',
       d.zieher ? 'Ticket: ' + d.zieher : '', d.mitarbeiter ? 'Verkauf: ' + d.mitarbeiter : ''].filter(Boolean);
     let knopf = '';
-    if (!n) {
-      const w = (d.schritte || {}).ausgezahlt;
+    if (st.fertig) {
+      const w = s.ausgezahlt;
       knopf = `<span class="zeile-fertig"><svg><use href="#i-check"/></svg>${w && w !== '✓' ? 'Ausgezahlt ' + datumDE(w) : 'Ausgezahlt'}</span>`;
+    } else if (st.ende) {
+      const w = s[st.ende.key];
+      knopf = st.ende.key === 'abgelehnt' && bearbeiten && E.offenerCall(heute())
+        ? `<button class="erledigt" data-neu-ansuchen title="Im Call ${esc(datumDE(E.offenerCall(heute())))} neu ansuchen"><svg><use href="#i-restore"/></svg>Neu ansuchen</button>`
+        : `<span class="zeile-ende">${esc(st.ende.label)}${w && w !== '✓' ? ' ' + datumDE(w) : ''}</span>`;
     } else if (bearbeiten) {
       knopf = n.auto
         ? `<button class="erledigt erledigt-leise" data-oeffnen>${esc(n.knopf)}</button>`
-        : `<button class="erledigt" data-schnell="${n.key}" title="${esc(n.label)} – heute erledigt"><svg><use href="#i-check"/></svg>${esc(n.knopf)}</button>`;
+        : `<button class="erledigt" data-schnell="${n.key}" title="${esc(n.todo)} – heute erledigt"><svg><use href="#i-check"/></svg>${esc(n.knopf)}</button>`;
     }
     return `<div class="zeile" data-id="${d.id}" tabindex="0">
       <div class="wer">
-        <div class="name">${esc(d.kunde || '(ohne Namen)')}</div>
+        <div class="name">${esc(d.kunde || '(ohne Namen)')}${s.frueher_abgelehnt ? ` <span class="marke-klein" title="Abgelehnt im Call ${esc(callsText(s.frueher_abgelehnt))}">2. Versuch</span>` : ''}</div>
         <div class="info">${esc(info.join(' · '))}</div>
+        ${fr && fr.stufe !== 'ruhig' ? `<div class="hinweis-frist">${fristBadge(fr, true)}</div>` : ''}
         ${(d.offene_punkte || '').trim() ? `<div class="hinweis"><svg><use href="#i-flag"/></svg>${esc(d.offene_punkte)}</div>` : ''}
-        ${fehlt.length && st.hoechster < 2 ? `<div class="hinweis warn"><svg><use href="#i-alert"/></svg>Es fehlen noch: ${esc(fehlt.join(', '))}</div>` : ''}
+        ${fehlt.length && st.hoechster < E.IDX.ticket && !st.ende ? `<div class="hinweis warn"><svg><use href="#i-alert"/></svg>Es fehlen noch: ${esc(fehlt.join(', '))}</div>` : ''}
       </div>
       <div class="zeile-stand">${fortschritt(d, st)}<span>${st.erledigt.filter(Boolean).length} von ${SCHRITTE.length}</span></div>
       <div class="zeile-knopf">${knopf}</div>
     </div>`;
   }
 
-  function phaseVon(i) { return i < 2 ? 'vor' : i < 7 ? 'antrag' : 'abrechnung'; }
 
   function zeichneGruppen(liste) {
     const bearbeiten = darf('bearbeiten') && !S.filter.papierkorb;
     const gruppen = new Map();
     liste.forEach(x => {
-      const key = x.st.fertig ? 'fertig' : SCHRITTE[x.st.naechster].key;
+      const key = x.st.fertig ? 'fertig' : x.st.ende ? x.st.ende.key : E.aufgabe(x.d, x.st).key;
       if (!gruppen.has(key)) gruppen.set(key, []);
       gruppen.get(key).push(x);
     });
@@ -352,45 +376,49 @@
     }
     const suche = !!S.filter.suche || !!S.extra;
     const zeigen = suche ? 999 : 6;
-    const keys = S.ansicht === 'fertig' ? ['fertig'] : SCHRITTE.map(x => x.key);
+    const defs = S.ansicht === 'fertig' ? [{ key: 'fertig', todo: 'Ausgezahlt', phase: 'fertig' }]
+      : S.ansicht === 'beendet' ? E.ENDE.map(e => ({ key: e.key, todo: e.label, phase: 'ende' }))
+      : GRUPPEN;
 
-    // Schrittleiste: alle Schritte mit Anzahl, Klick springt zur Gruppe
-    const leiste = S.ansicht === 'fertig' ? '' : `<nav class="schrittleiste" aria-label="Ablauf">${SCHRITTE.map((st, i) => {
-      const n = (gruppen.get(st.key) || []).length;
-      return `<a href="#gruppe-${st.key}" class="sl sl-${phaseVon(i)} ${n ? '' : 'leer'} ${st.warten ? 'sl-warten' : ''}" title="${esc(st.warten || st.todo)}">
-        <span class="sl-nr">${i + 1}</span><span class="sl-zahl">${n}</span><span class="sl-text">${esc(st.todo)}</span></a>`;
+    // Schrittleiste: jeder Schritt mit Anzahl, Klick springt zur Gruppe
+    const leiste = S.ansicht !== 'offen' ? '' : `<nav class="schrittleiste" style="grid-template-columns:repeat(${GRUPPEN.length},minmax(0,1fr))" aria-label="Ablauf">${GRUPPEN.map((g, i) => {
+      const n = (gruppen.get(g.key) || []).length;
+      return `<a href="#gruppe-${g.key}" class="sl sl-${g.phase} ${n ? '' : 'leer'} ${g.warten ? 'sl-warten' : ''}" title="${esc(g.warten || g.todo)}">
+        <span class="sl-nr">${i + 1}</span><span class="sl-zahl">${n}</span><span class="sl-text">${esc(g.kurz || g.todo)}</span></a>`;
     }).join('')}</nav>`;
 
-    const gruppenHtml = keys.map(k => {
+    const call = E.offenerCall(heute());
+    const gruppenHtml = defs.map((g, i) => {
+      const k = g.key;
       const eintraege = (gruppen.get(k) || []).sort((a, b) => ((a.d.foerdercall || '9999') + a.d.kunde).localeCompare((b.d.foerdercall || '9999') + b.d.kunde, 'de'));
-      const i = SCHRITTE.findIndex(x => x.key === k);
-      const st = SCHRITTE[i];
-      const phase = k === 'fertig' ? 'fertig' : phaseVon(i);
-      const titel = k === 'fertig' ? 'Ausgezahlt' : st.todo;
-      const warten = st && st.warten ? '<span class="warte-tag">wartet auf Förderstelle</span>' : '';
+      const nr = S.ansicht === 'offen' ? String(i + 1) : `<svg><use href="#${S.ansicht === 'fertig' ? 'i-check' : 'i-flag'}"/></svg>`;
+      const warten = g.warten ? '<span class="warte-tag">wartet auf Förderstelle</span>' : '';
       if (!eintraege.length) {
-        if (suche) return '';
-        return `<section class="gruppe gruppe-leer g-${phase}" id="gruppe-${k}">
-          <div class="gruppe-kopf"><span class="gruppe-nr">${i + 1}</span><h2>${esc(titel)}</h2>${warten}<span class="leer-text">nichts offen</span></div></section>`;
+        if (suche || S.ansicht !== 'offen') return '';
+        return `<section class="gruppe gruppe-leer g-${g.phase}" id="gruppe-${k}">
+          <div class="gruppe-kopf"><span class="gruppe-nr">${nr}</span><h2>${esc(g.todo)}</h2>${warten}<span class="leer-text">nichts offen</span></div></section>`;
       }
       const offen = S.aufgeklappt.has(k) || eintraege.length <= zeigen + 1;
-      const extra = k === 'aufgeteilt' && bearbeiten ? '<button class="btn btn-wuerfel" data-aktion="wuerfeln"><svg><use href="#i-dice"/></svg>Automatisch aufteilen</button>' : '';
-      return `<section class="gruppe g-${phase} ${st && st.warten ? 'gruppe-warten' : ''}" id="gruppe-${k}">
-        <div class="gruppe-kopf"><span class="gruppe-nr">${k === 'fertig' ? '<svg><use href="#i-check"/></svg>' : i + 1}</span><h2>${esc(titel)}</h2><span class="anz">${eintraege.length}</span>${warten}${extra}</div>
+      const extra = k === 'aufgeteilt' && bearbeiten ? '<button class="btn btn-wuerfel" data-aktion="wuerfeln"><svg><use href="#i-dice"/></svg>Automatisch aufteilen</button>'
+        : k === 'abgelehnt' && bearbeiten && call && eintraege.length > 1 ? `<button class="btn btn-wuerfel" data-aktion="alle-neu-ansuchen"><svg><use href="#i-restore"/></svg>Alle ${eintraege.length} im Call ${esc(datumDE(call))} neu ansuchen</button>` : '';
+      return `<section class="gruppe g-${g.phase} ${g.warten ? 'gruppe-warten' : ''}" id="gruppe-${k}">
+        <div class="gruppe-kopf"><span class="gruppe-nr">${nr}</span><h2>${esc(g.todo)}</h2><span class="anz">${eintraege.length}</span>${warten}${extra}</div>
         <div class="gruppe-karte">
           ${(offen ? eintraege : eintraege.slice(0, zeigen)).map(x => zeileHtml(x.d, x.st, bearbeiten)).join('')}
           ${offen ? '' : `<button class="mehr" data-mehr="${k}">Alle ${eintraege.length} anzeigen</button>`}
         </div>
       </section>`;
     }).join('');
-    $('#liste').innerHTML = leiste + (gruppenHtml.trim() ? gruppenHtml : `<div class="leer-hinweis">${suche ? (S.extra ? 'Keine Kunden mit diesem Filter.' : 'Kein Kunde gefunden.') : 'Noch keine Förderung ausgezahlt.'}</div>`);
+    const leerText = suche ? (S.extra ? 'Keine Kunden mit diesem Filter.' : 'Kein Kunde gefunden.')
+      : S.ansicht === 'beendet' ? 'Keine abgelehnten oder zurückgezogenen Förderungen.' : 'Noch keine Förderung ausgezahlt.';
+    $('#liste').innerHTML = leiste + (gruppenHtml.trim() ? gruppenHtml : `<div class="leer-hinweis">${leerText}</div>`);
   }
 
   function fortschritt(d, st) {
-    return `<div class="balken" aria-label="Fortschritt">${SCHRITTE.map((s, i) => {
-      const w = E.schrittWert(d, s.key);
+    return `<div class="balken" style="grid-template-columns:repeat(${SCHRITTE.length},1fr)" aria-label="Fortschritt">${SCHRITTE.map((x, i) => {
+      const w = E.schrittWert(d, x.key);
       const cls = st.erledigt[i] ? 'ok' : (st.luecken.includes(i) ? 'luecke' : (i === st.naechster ? 'naechst' : ''));
-      return `<i class="${cls}" title="${esc(s.label)}${w ? ': ' + esc(w === '✓' ? 'erledigt' : datumDE(w)) : st.luecken.includes(i) ? ': übersprungen?' : ''}"></i>`;
+      return `<i class="p-${x.phase} ${cls}" title="${esc(x.label)}${w ? ': ' + esc(w === '✓' ? 'erledigt' : datumDE(w)) : st.luecken.includes(i) ? ': übersprungen?' : ''}"></i>`;
     }).join('')}</div>`;
   }
 
@@ -409,22 +437,23 @@
         ${kopf('kwp', 'Anlage', 'sp-r')}<th class="sp-l">Ticket / FPJ</th>${kopf('status', 'Stand')}<th class="sp-aktion"></th>
       </tr></thead>
       <tbody>${liste.map(({ d, st }) => {
-        const n = st.naechster >= 0 ? SCHRITTE[st.naechster] : null;
+        const n = E.aufgabe(d, st);
+        const fr = E.fristen(d, heute())[0];
         const fehlt = E.fehlendeDaten(d);
         const anlage = [d.kwp ? zahlDE(d.kwp) + ' kWp' : '', d.speicher ? d.speicher : ''].filter(Boolean).join(' · ');
         return `<tr data-id="${d.id}" tabindex="0">
           <td class="sp-kunde"><div class="kunde">${esc(d.kunde || '(ohne Namen)')}</div>
             <div class="klein grau">${esc([d.plz, d.ort].filter(Boolean).join(' '))}${d.projekt_nr ? ' · ' + esc(d.projekt_nr) : ''}${d.art ? ' · ' + esc(d.art) : ''}</div>
             ${(d.offene_punkte || '').trim() ? `<div class="hinweis-zeile"><svg><use href="#i-flag"/></svg>${esc(d.offene_punkte)}</div>` : ''}
-            ${fehlt.length && st.hoechster < 2 ? `<div class="hinweis-zeile warn"><svg><use href="#i-alert"/></svg>fehlt: ${esc(fehlt.join(', '))}</div>` : ''}</td>
+            ${fehlt.length && st.hoechster < E.IDX.ticket && !st.ende ? `<div class="hinweis-zeile warn"><svg><use href="#i-alert"/></svg>fehlt: ${esc(fehlt.join(', '))}</div>` : ''}</td>
           <td data-l="Call">${d.foerdercall ? datumDE(d.foerdercall) : '<span class="grau">–</span>'}</td>
           <td data-l="Mitarbeiter" class="sp-m">${esc(d.mitarbeiter) || '<span class="grau">–</span>'}</td>
           <td data-l="Zieher" class="sp-m">${esc(d.zieher) || '<span class="grau">–</span>'}</td>
           <td data-l="Anlage" class="sp-r">${esc(anlage) || '<span class="grau">–</span>'}</td>
           <td data-l="Ticket / FPJ" class="sp-l mono klein">${esc(d.ticket) || '<span class="grau">–</span>'}${d.fpj ? '<br>' + esc(d.fpj) : ''}</td>
           <td class="sp-stand">${fortschritt(d, st)}
-            <div class="stand-text">${st.fertig ? '<span class="gruen">Ausgezahlt</span>' : `<span class="grau">Als Nächstes:</span> ${esc(n.todo)}`}</div></td>
-          <td class="sp-aktion">${bearbeiten && n && !n.auto ? `<button class="btn btn-mini" data-schnell="${n.key}" title="${esc(n.label)} – heute erledigt"><svg><use href="#i-check"/></svg><span>${esc(n.kurz)}</span></button>` : ''}</td>
+            <div class="stand-text">${st.fertig ? '<span class="gruen">Ausgezahlt</span>' : st.ende ? `<span class="rot">${esc(st.ende.label)}</span>` : `<span class="grau">Als Nächstes:</span> ${esc(n.todo)}`}</div>${fr && fr.stufe !== 'ruhig' ? fristBadge(fr, false) : ''}</td>
+          <td class="sp-aktion">${bearbeiten && st.ende && st.ende.key === 'abgelehnt' && E.offenerCall(heute()) ? '<button class="btn btn-mini" data-neu-ansuchen><svg><use href="#i-restore"/></svg><span>Neu ansuchen</span></button>' : ''}${bearbeiten && n && !n.auto ? `<button class="btn btn-mini" data-schnell="${n.key}" title="${esc(n.label)} – heute erledigt"><svg><use href="#i-check"/></svg><span>${esc(n.kurz)}</span></button>` : ''}</td>
         </tr>`;
       }).join('')}</tbody></table>`;
   }
@@ -432,16 +461,43 @@
   async function schnellErledigt(id, key) {
     const d = S.daten.find(x => x.id === id);
     if (!d) return;
-    const schritt = SCHRITTE.find(s => s.key === key);
     try {
       const neu = await Q.aendern(id, { schritte: Object.assign({}, d.schritte || {}, { [key]: heute() }) }, d.geaendert_am);
       Object.assign(d, neu);
-      toast(`${d.kunde}: ${schritt.label} ✓`, 'ok');
+      toast(`${d.kunde}: ${ALLE_LABEL[key] || key} ✓`, 'ok');
       zeichne();
     } catch (e) {
       if (e.konflikt) { toast('Der Eintrag wurde gerade von jemand anderem geändert – Liste neu geladen.', 'fehler'); laden(); }
       else toast(E.fehlerText(e), 'fehler');
     }
+  }
+
+  // Abgelehnt → im offenen Call neu ansuchen (Ticket weg, Projekt bleibt, Herkunft gemerkt)
+  async function schnellNeuAnsuchen(id) {
+    const d = S.daten.find(x => x.id === id);
+    if (!d) return;
+    try {
+      const patch = E.neuAnsuchen(d, heute());
+      Object.assign(d, await Q.aendern(id, patch, d.geaendert_am));
+      toast(`${d.kunde}: neu im Call ${datumDE(patch.foerdercall)} – als Nächstes Ticket ziehen`, 'ok');
+      zeichne();
+    } catch (e) {
+      if (e.konflikt) { toast('Der Eintrag wurde gerade von jemand anderem geändert – Liste neu geladen.', 'fehler'); laden(); }
+      else toast(E.fehlerText(e), 'fehler');
+    }
+  }
+
+  async function alleNeuAnsuchen() {
+    const call = E.offenerCall(heute());
+    const liste = aktuelleListe().filter(x => x.st.ende && x.st.ende.key === 'abgelehnt');
+    if (!call || !liste.length) return;
+    if (!(await frage(`${liste.length} abgelehnte Förderungen im Call ${datumDE(call)} neu ansuchen? Ticket und Einreichung werden zurückgesetzt, das Portal-Projekt bleibt.`, 'Neu ansuchen'))) return;
+    let ok = 0, fehler = 0;
+    for (const x of liste) {
+      try { Object.assign(x.d, await Q.aendern(x.d.id, E.neuAnsuchen(x.d, heute()), x.d.geaendert_am)); ok++; } catch (e) { fehler++; }
+    }
+    toast(`${ok} neu angesucht${fehler ? `, ${fehler} Fehler – bitte Liste neu laden` : ''}.`, fehler ? 'fehler' : 'ok');
+    zeichne();
   }
 
   // ---------------------------------------------------------------
@@ -485,28 +541,76 @@
       const wert = f.typ === 'number' && v !== null && v !== undefined ? String(v).replace('.', ',') : (v || '');
       inp = `<input type="${typ}" name="${k}" value="${esc(wert)}" ${liste} ${dis} ${f.mono ? 'class="mono"' : ''} autocomplete="off">${dl}`;
     }
-    return `<label class="feld ${f.breit ? 'breit' : ''} ${f.klein ? 'schmal' : ''}"><span>${esc(label)}</span>${inp}</label>`;
+    return `<label class="feld ${f.breit ? 'breit' : ''} ${f.klein ? 'schmal' : ''}"><span>${esc(label)}</span>${inp}<small class="feld-hinweis" id="h-${k}">${feldHinweis(k, rec)}</small></label>`;
   }
 
+  // Prüf-Hinweise direkt unter einem Feld
+  function feldHinweis(k, rec) {
+    if (k === 'zaehlpunkt') {
+      const p = E.zpPruefung(rec.zaehlpunkt);
+      return p === 'ohneAT' ? '31 Stellen ohne „AT“ – im EAG-Portal mit AT davor eintragen'
+        : p === 'ungueltig' ? '<b class="rot">Format prüfen: AT + 31 Zeichen</b>' : '';
+    }
+    if (k === 'kwp' && (rec.programm || 'EAG') === 'EAG') {
+      const z = E.zuschuss(rec);
+      if (!z) return '';
+      return `Kategorie ${z.kat} · ca. ${z.gesamt.toLocaleString('de-AT')} € Zuschuss (Sätze 2026${z.kat >= 'C' ? ', Höchstsatz' : ''})`
+        + (z.speicherOk === false ? ' · <b class="rot">Speicher nicht förderfähig: 0,5 kWh je kWp bis 50 kWh</b>' : '');
+    }
+    return '';
+  }
+
+  function fristenHtml(rec) {
+    const fr = E.fristen(rec, heute());
+    if (!fr.length) return '';
+    return `<div class="fristen">${fr.map(f => `<div class="frist-zeile fz-${f.stufe}"><b>${esc(f.label)}</b><span>${f.datum ? datumDE(f.datum) : 'unbekannt'}</span>
+      <small>${esc(f.tage === null ? f.hinweis : (f.tage < 0 ? `${-f.tage} Tage überfällig` : f.tage === 0 ? 'heute' : `noch ${f.tage} Tage`) + (f.hinweis ? ' · ' + f.hinweis : ''))}</small></div>`).join('')}</div>`;
+  }
+
+  function schrittZeile(rec, st, x, i, nurLesen) {
+    const w = E.schrittWert(rec, x.key);
+    const cls = st.erledigt[i] ? 'ok' : (i === st.naechster ? 'naechst' : (st.luecken.includes(i) ? 'luecke' : ''));
+    const hilfe = i === st.naechster && x.hilfe ? `<span class="ablauf-auto">${esc(x.hilfe)}</span>` : '';
+    if (x.auto) {
+      let txt;
+      if (x.key === 'daten') { const fehlt = E.fehlendeDaten(rec); txt = fehlt.length ? 'fehlt: ' + fehlt.join(', ') : 'vollständig'; }
+      else txt = rec.zieher ? 'an ' + rec.zieher : 'Ticket-Zieher unten bei „Förderung“ eintragen';
+      return `<li class="${cls}"><span class="punkt">${st.erledigt[i] ? '<svg><use href="#i-check"/></svg>' : i + 1}</span>
+        <span class="ablauf-titel">${esc(x.label)}</span><span class="ablauf-auto">${esc(txt)}</span></li>`;
+    }
+    const datum = E.istDatum(w) ? w : '';
+    return `<li class="${cls}"><label class="punkt punkt-klick"><input type="checkbox" data-schritt="${x.key}" ${w ? 'checked' : ''} ${nurLesen ? 'disabled' : ''}>
+        <span>${st.erledigt[i] ? '<svg><use href="#i-check"/></svg>' : i + 1}</span></label>
+      <span class="ablauf-titel">${esc(x.label)}${st.luecken.includes(i) ? ' <span class="luecke-text">übersprungen?</span>' : ''}</span>
+      <input type="date" class="ablauf-datum" data-schritt-datum="${x.key}" value="${esc(datum)}" ${nurLesen ? 'disabled' : ''} title="Datum">
+      ${w === '✓' ? `<span class="ablauf-auto">${x.key === 'vertrag_erhalten' ? '<b class="rot">Datum fehlt – ohne Datum keine Fristen</b>' : 'erledigt, Datum unbekannt'}</span>` : hilfe}</li>`;
+  }
+
+  // Ablauf nach Phasen, mit Nebenschritten an der Stelle, an der sie passieren
   function ablaufHtml(rec, nurLesen) {
     const st = E.status(rec);
-    return `<ol class="ablauf">${SCHRITTE.map((s, i) => {
-      const w = E.schrittWert(rec, s.key);
-      const cls = st.erledigt[i] ? 'ok' : (i === st.naechster ? 'naechst' : (st.luecken.includes(i) ? 'luecke' : ''));
-      if (s.auto) {
-        let txt;
-        if (s.key === 'daten') { const fehlt = E.fehlendeDaten(rec); txt = fehlt.length ? 'fehlt: ' + fehlt.join(', ') : 'vollständig'; }
-        else txt = rec.zieher ? 'an ' + rec.zieher : 'Ticket-Zieher unten bei „Förderung“ eintragen';
-        return `<li class="${cls}"><span class="punkt">${st.erledigt[i] ? '<svg><use href="#i-check"/></svg>' : i + 1}</span>
-          <span class="ablauf-titel">${esc(s.label)}</span><span class="ablauf-auto">${esc(txt)}</span></li>`;
-      }
-      const datum = w && w !== '✓' ? w : '';
-      return `<li class="${cls}"><label class="punkt punkt-klick"><input type="checkbox" data-schritt="${s.key}" ${w ? 'checked' : ''} ${nurLesen ? 'disabled' : ''}>
-          <span>${st.erledigt[i] ? '<svg><use href="#i-check"/></svg>' : i + 1}</span></label>
-        <span class="ablauf-titel">${esc(s.label)}${st.luecken.includes(i) ? ' <span class="luecke-text">übersprungen?</span>' : ''}</span>
-        <input type="date" class="ablauf-datum" data-schritt-datum="${s.key}" value="${esc(datum)}" ${nurLesen ? 'disabled' : ''} title="Datum">
-        ${w === '✓' ? '<span class="ablauf-auto">erledigt, Datum unbekannt</span>' : ''}</li>`;
-    }).join('')}</ol>`;
+    const s = rec.schritte || {};
+    const neben = (key, titel) => `<li class="neben"><span class="punkt punkt-neben">+</span><span class="ablauf-titel">${esc(titel)}</span>
+      <input type="date" class="ablauf-datum" data-schritt-datum="${key}" value="${esc(E.istDatum(s[key]) ? s[key] : '')}" ${nurLesen ? 'disabled' : ''} title="Datum"></li>`;
+    let html = '';
+    E.PHASEN.forEach(ph => {
+      html += `<li class="phase phase-${ph.key}">${esc(ph.label)}</li>`;
+      SCHRITTE.forEach((x, i) => {
+        if (x.phase !== ph.key) return;
+        html += schrittZeile(rec, st, x, i, nurLesen);
+        if (x.key === 'eingereicht' && ((st.erledigt[i] && !st.erledigt[E.IDX.vertrag_erhalten]) || s.nachforderung)) {
+          html += neben('nachforderung', 'Nachforderung erhalten');
+          if (s.nachforderung) html += neben('nachgereicht', 'Unterlagen nachgereicht');
+        }
+        if (x.key === 'inbetriebnahme' && ((st.erledigt[E.IDX.vertrag_erhalten] && !st.erledigt[i]) || s.verlaengert_bis)) {
+          html += neben('verlaengert_bis', 'Frist verlängert bis');
+        }
+      });
+    });
+    const ende = nurLesen ? '' : `<div class="ergebnis"><span class="grau klein">Endet ohne Auszahlung?</span><div class="ergebnis-knoepfe">${E.ENDE.map(e =>
+      `<button type="button" class="btn btn-mini-leise ${s[e.key] ? 'aktiv' : ''}" data-ende="${e.key}">${s[e.key] ? '✓ ' : ''}${esc(e.label)}</button>`).join('')}</div></div>`;
+    const frueher = s.frueher_abgelehnt ? `<p class="klein grau">Abgelehnt im Call ${esc(callsText(s.frueher_abgelehnt))}, danach neu angesucht.</p>` : '';
+    return fristenHtml(rec) + `<ol class="ablauf">${html}</ol>` + frueher + ende;
   }
 
   function jetztHtml(rec, nurLesen, neu) {
@@ -519,10 +623,20 @@
     if (neu) return '<div class="jetzt jetzt-neu"><div class="jetzt-text"><small>Neuer Kunde</small><b>Daten eintragen und speichern</b></div></div>';
     const st = E.status(rec);
     if (st.fertig) return '<div class="jetzt jetzt-fertig"><div class="jetzt-text"><small>Stand</small><b>Komplett erledigt – ausgezahlt</b></div></div>';
-    const n = SCHRITTE[st.naechster];
+    if (st.ende) {
+      const w = (rec.schritte || {})[st.ende.key];
+      const call = E.offenerCall(heute());
+      const text = st.ende.key !== 'abgelehnt' ? 'Keine weiteren Schritte.'
+        : call ? `Neu ansuchen geht bis ${datumDE(E.callEnde(call))}: Ticket am ${datumDE(call)} ab 17:00 Uhr.` : 'Kein Fördercall mehr offen – 2027 gibt es keinen.';
+      return `<div class="jetzt jetzt-ende"><div class="jetzt-text"><small>Beendet</small><b>${esc(st.ende.label)}${w && w !== '✓' ? ' am ' + datumDE(w) : ''}</b><span>${esc(text)}</span></div>
+        ${st.ende.key === 'abgelehnt' && call && !nurLesen ? `<button class="erledigt erledigt-gross" data-neu-ansuchen-detail><svg><use href="#i-restore"/></svg>Im Call ${esc(datumDE(call))} neu ansuchen</button>` : ''}</div>`;
+    }
+    const n = E.aufgabe(rec, st);
+    const fr = E.fristen(rec, heute())[0];
     const hinweis = n.key === 'daten' ? 'Unten die fehlenden Angaben ergänzen: ' + E.fehlendeDaten(rec).join(', ')
-      : n.key === 'aufgeteilt' ? 'Unten bei „Förderung“ den Ticket-Zieher eintragen' : '';
-    return `<div class="jetzt"><div class="jetzt-text"><small>Als Nächstes · Schritt ${st.naechster + 1} von ${SCHRITTE.length}</small><b>${esc(n.todo)}</b>${n.warten ? '<span>Wartet auf die Förderstelle – abhaken, sobald es da ist.</span>' : ''}${hinweis ? `<span>${esc(hinweis)}</span>` : ''}</div>
+      : n.key === 'aufgeteilt' ? 'Unten bei „Förderung“ den Ticket-Zieher eintragen' : (n.hilfe || '');
+    const laut = fr && ['unbekannt', 'ueberfaellig', 'dringend'].includes(fr.stufe);
+    return `<div class="jetzt ${laut ? 'jetzt-dringend' : ''}"><div class="jetzt-text"><small>Als Nächstes · ${n.neben ? 'Nebenschritt' : `Schritt ${st.naechster + 1} von ${SCHRITTE.length}`}</small><b>${esc(n.todo)}</b>${n.warten ? '<span>Wartet auf die Förderstelle – abhaken, sobald es da ist.</span>' : ''}${hinweis ? `<span>${esc(hinweis)}</span>` : ''}${fr ? `<span class="jetzt-frist">${fristBadge(fr, true)}</span>` : ''}</div>
       ${!nurLesen && !n.auto ? `<button class="erledigt erledigt-gross" data-jetzt="${n.key}"><svg><use href="#i-check"/></svg>${esc(n.knopf)} – speichern</button>` : ''}</div>`;
   }
 
@@ -612,8 +726,9 @@
     } else if (el.name) {
       rec[el.name] = formWert(el);
       if (el.name === 'offene_punkte' && e.type === 'change') $('#d-jetzt').innerHTML = jetztHtml(rec, false, S.detail.neu);
-      if (['kunde', 'strasse', 'plz', 'ort', 'zaehlpunkt', 'mail', 'kwp', 'speicher', 'art', 'zieher'].includes(el.name) && e.type === 'change') {
+      if (['kunde', 'strasse', 'plz', 'ort', 'zaehlpunkt', 'mail', 'kwp', 'speicher', 'art', 'zieher', 'programm'].includes(el.name) && e.type === 'change') {
         ablaufNeu();
+        ['zaehlpunkt', 'kwp'].forEach(k => { const h = document.getElementById('h-' + k); if (h) h.innerHTML = feldHinweis(k, rec); });
       }
     }
     aktualisiereStatus();
@@ -762,8 +877,10 @@
         Object.entries(r.aenderungen || {}).forEach(([k, [alt, neu]]) => {
           if (k === 'schritte') {
             const a = alt || {}, n = neu || {};
-            SCHRITTE.forEach(s => {
-              if ((a[s.key] || '') !== (n[s.key] || '')) teile.push(n[s.key] ? `<b>${esc(s.label)}</b> ✓${n[s.key] !== '✓' ? ' (' + datumDE(n[s.key]) + ')' : ''}` : `<b>${esc(s.label)}</b> zurückgenommen`);
+            Array.from(new Set(Object.keys(a).concat(Object.keys(n)))).forEach(key => {
+              if ((a[key] || '') === (n[key] || '')) return;
+              const label = esc(ALLE_LABEL[key] || key), v = n[key];
+              teile.push(v ? `<b>${label}</b> ✓${v !== '✓' ? ' (' + esc(E.istDatum(v) ? datumDE(v) : callsText(v)) + ')' : ''}` : `<b>${label}</b> zurückgenommen`);
             });
           } else if (k === 'geloescht_am') {
             teile.push(neu ? '<b>in Papierkorb verschoben</b>' : '<b>wiederhergestellt</b>');
@@ -808,7 +925,12 @@
         'Speicher': d.speicher, 'Anbringung': d.anbringung, 'Zeitplan': d.zeitplan, 'Art': d.art, 'Ticket': d.ticket, 'FPJ': d.fpj
       };
       SCHRITTE.filter(s => !s.auto).forEach(s => { const w = (d.schritte || {})[s.key]; z[s.label] = w ? (w === '✓' ? '✓' : datumDE(w)) : ''; });
-      z['Nächster Schritt'] = st.fertig ? 'fertig' : SCHRITTE[st.naechster].label;
+      Object.keys(E.NEBEN).forEach(k => { const w = (d.schritte || {})[k]; z[E.NEBEN[k]] = w ? (E.istDatum(w) ? datumDE(w) : callsText(w)) : ''; });
+      const ew = st.ende ? (d.schritte || {})[st.ende.key] : '';
+      const fr = E.fristen(d, heute())[0];
+      z['Ergebnis'] = st.ende ? st.ende.label + (E.istDatum(ew) ? ' ' + datumDE(ew) : '') : '';
+      z['Nächster Schritt'] = st.fertig ? 'fertig' : st.ende ? '' : E.aufgabe(d, st).todo;
+      z['Nächste Frist'] = fr ? `${fr.label}: ${fr.datum ? datumDE(fr.datum) : 'unbekannt'}` : '';
       z['Offene Punkte'] = d.offene_punkte; z['Info'] = d.info;
       return z;
     });
@@ -843,7 +965,7 @@
     return S.daten.filter(d => {
       if (d.geloescht_am) return false;
       if (call === 'ohne' ? !!d.foerdercall : d.foerdercall !== call) return false;
-      if (E.status(d).hoechster >= 2) return false; // Ticket schon gezogen
+      if (E.status(d).hoechster >= E.IDX.ticket) return false; // Ticket schon gezogen
       return alle || !(d.zieher || '').trim();
     });
   }
@@ -851,7 +973,7 @@
   function wuerfelDialog() {
     wurf = null;
     const namen = speicherLokal.lesen('zieherliste', null) || zieherWerte();
-    const offen = S.daten.filter(d => !d.geloescht_am && !(d.zieher || '').trim() && E.status(d).hoechster < 2);
+    const offen = S.daten.filter(d => !d.geloescht_am && !(d.zieher || '').trim() && E.status(d).hoechster < E.IDX.ticket);
     const calls = werte('foerdercall').sort().reverse();
     const vorschlag = S.filter.call && S.filter.call !== 'ohne' ? S.filter.call
       : (calls.find(c => offen.some(d => d.foerdercall === c)) || calls[0] || 'ohne');
@@ -1023,6 +1145,8 @@
         <div><b>${ab.gleich.length}</b><span>schon aktuell</span></div>
         <div><b>${a.doppelt}</b><span>Doppelte zusammengeführt</span></div>
       </div>
+      ${(() => { const n = ab.neu.filter(f => f._abgelehntIm).length + ab.ergaenzen.filter(e => e.neuAngesucht).length; const c = E.offenerCall(heute());
+        return n ? `<div class="imp-hinweise"><b><svg><use href="#i-restore"/></svg>${n} in der Liste orange markiert (abgelehnt)</b><ul><li>${c ? `Werden in den Call ${esc(datumDE(c))} übernommen: Ticket und Einreichung zurückgesetzt, Portal-Projekt bleibt.` : 'Kein Call mehr offen – sie werden als abgelehnt gespeichert.'}</li></ul></div>` : ''; })()}
       ${a.hinweise.length ? `<div class="imp-hinweise"><b><svg><use href="#i-alert"/></svg>Bitte nach dem Import prüfen (${a.hinweise.length})</b><ul>${a.hinweise.map(h => `<li>${esc(h)}</li>`).join('')}</ul></div>` : ''}
       <details class="imp-vorschau"><summary>Vorschau der neuen Einträge</summary>
         <table class="mini-tabelle"><thead><tr><th>Kunde</th><th>Jahr</th><th>Call</th><th>Zieher</th><th>Stand</th><th>aus</th></tr></thead><tbody>
@@ -1151,6 +1275,7 @@
         case 'detail-zu': schliesseDetail(false); break;
         case 'dialog-zu': dialogZu(); break;
         case 'wuerfeln': wuerfelDialog(); break;
+        case 'alle-neu-ansuchen': alleNeuAnsuchen(); break;
         case 'mehr-filter': $('#mehr-filter').hidden = !$('#mehr-filter').hidden; break;
         case 'filter-zurueck':
           Object.assign(S.filter, { suche: '', call: '', art: '', mitarbeiter: '', zieher: '', schritt: '', papierkorb: false });
@@ -1189,6 +1314,7 @@
       const q = e.target.closest('[data-schnell]');
       const tr = e.target.closest('tr[data-id], .zeile[data-id]');
       if (q && tr) { e.stopPropagation(); schnellErledigt(tr.dataset.id, q.dataset.schnell); return; }
+      if (e.target.closest('[data-neu-ansuchen]') && tr) { e.stopPropagation(); schnellNeuAnsuchen(tr.dataset.id); return; }
       if (tr) oeffne(S.daten.find(d => d.id === tr.dataset.id));
     });
     $('#liste').addEventListener('keydown', e => {
@@ -1203,6 +1329,18 @@
       if (e.target.closest('[data-zu-punkten]')) {
         const f = $('#d-inhalt [name="offene_punkte"]');
         f.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => f.focus(), 300);
+        return;
+      }
+      const endeKnopf = e.target.closest('[data-ende]');
+      if (endeKnopf && S.detail) {
+        const sch = Object.assign({}, S.detail.rec.schritte);
+        if (sch[endeKnopf.dataset.ende]) delete sch[endeKnopf.dataset.ende]; else sch[endeKnopf.dataset.ende] = heute();
+        S.detail.rec.schritte = sch;
+        ablaufNeu(); aktualisiereStatus();
+        return;
+      }
+      if (e.target.closest('[data-neu-ansuchen-detail]') && S.detail) {
+        try { Object.assign(S.detail.rec, E.neuAnsuchen(S.detail.rec, heute())); speichern(); } catch (err) { toast(err.message, 'fehler'); }
         return;
       }
       const b = e.target.closest('[data-jetzt]');

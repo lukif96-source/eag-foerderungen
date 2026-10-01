@@ -2,7 +2,7 @@
 // die Datei verlässt den Rechner nur als Datensätze in die eigene Datenbank.
 (function () {
   'use strict';
-  const { SCHRITTE, leer, gleicherKunde, zpNorm } = window.EAG;
+  const { SCHRITTE, leer, gleicherKunde, zpNorm, neuAnsuchen, offenerCall, heuteText } = window.EAG;
 
   function norm(s) {
     return String(s || '').toLowerCase()
@@ -93,9 +93,12 @@
   // Datum hinter einem Häkchen, z. B. "✓ 25.06.2025"
   function d2(t) { return /\d{1,2}\.\d{1,2}\.\d{2,4}/.test(t) ? datum(t) : null; }
 
-  // Ist ein späterer Schritt erledigt, waren die davor es auch (in Excel oft nicht eingetragen)
+  // Ist ein späterer Schritt erledigt, waren die davor es auch (in Excel oft nicht eingetragen).
+  // Ausnahme: Schritte, die die Excel-Liste gar nicht kennt (Inbetriebnahme, E-Control) –
+  // die werden nie erfunden. "Projekt angelegt" steht vor dem Ticket: eine Portal-Nummer
+  // heißt also NICHT, dass ein Ticket gezogen wurde.
   function vorherigeAbhaken(s) {
-    const keys = SCHRITTE.filter(x => !x.auto).map(x => x.key);
+    const keys = SCHRITTE.filter(x => !x.auto && !x.neu).map(x => x.key);
     let hoechster = -1;
     keys.forEach((k, i) => { if (s[k]) hoechster = i; });
     for (let i = 0; i < hoechster; i++) if (!s[keys[i]]) s[keys[i]] = '✓';
@@ -112,7 +115,7 @@
   }
 
   // Liest eine Tabelle; liefert Datensätze + Hinweise
-  function leseBlatt(ws, name, versteckt, standardJahr) {
+  function leseBlatt(ws, name, versteckt, standardJahr, heute) {
     const X = window.XLSX;
     const zeilen = X.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
     const k = kopfZeile(zeilen);
@@ -123,10 +126,13 @@
     const jahr = jm ? +jm[0] : standardJahr;
     const programm = /salzburg/i.test(titel + name) ? 'Land Salzburg' : 'EAG';
     const vertragDa = /vertrag erhalten/i.test(titel + ' ' + name);
+    // "1 Fördercall …" im Blattnamen = erster Call dieses Jahres (wenn keine Zwischenüberschrift ein Datum liefert)
+    const callNr = (titel + ' ' + name).match(/(\d)\.?\s*F(?:ö|oe)rdercall/i);
+    const callAusName = callNr ? (Object.keys(window.EAG.CALLS).sort().filter(c => c.startsWith(String(jahr))))[+callNr[1] - 1] || null : null;
     const map = (zeilen[k] || []).map(spalte);
     const spB = map.indexOf('kunde');
     const recs = [], hinweise = [];
-    let call = null, artVorgabe = /speicher/i.test(name) ? 'Speicher' : '';
+    let call = callAusName, artVorgabe = /speicher/i.test(name) ? 'Speicher' : '';
 
     for (let zi = k + 1; zi < zeilen.length; zi++) {
       const r = zeilen[zi] || [];
@@ -199,7 +205,13 @@
           case 'plz': f.plz = text(typeof v === 'number' ? Math.round(v) : v); break;
           case 'wr_leistung': f.wr_leistung = typeof v === 'number' ? (v >= 1000 ? v / 1000 : v) + ' kW' : text(v); break;
           case 'speicher': f.speicher = typeof v === 'number' ? v + ' kWh' : text(v); break;
-          case 'offene_punkte': punkte.push(text(v)); break;
+          case 'offene_punkte': {
+            const t = text(v);
+            const ibn = /\bIBN\b\D{0,3}(\d{1,2}\.\d{1,2}\.\d{2,4})/i.exec(t);   // "IBN 17.12.2025" = Inbetriebnahme
+            if (ibn && datum(ibn[1])) f.schritte.inbetriebnahme = datum(ibn[1]);
+            punkte.push(t);
+            break;
+          }
           case 'info': notizen.push(text(v)); break;
           default: f[feld] = text(v);
         }
@@ -210,6 +222,13 @@
       const zelle = ws[window.XLSX.utils.encode_cell({ r: zi, c: spB })];
       const farbe = zelle && zelle.s && zelle.s.fgColor && zelle.s.fgColor.rgb;
       if (farbe && /92D050$/i.test(farbe) && !f.schritte.vertrag_erhalten) f.schritte.vertrag_erhalten = '✓';
+      // orange-rot (FF572F) = in diesem Call abgelehnt → neu ansuchen (solange ein Call offen ist)
+      if (farbe && /FF572F$/i.test(farbe) && f.foerdercall) {
+        f._abgelehntIm = f.foerdercall;
+        delete f.schritte.ticket; delete f.schritte.eingereicht;
+        if (offenerCall(heute)) Object.assign(f, neuAnsuchen(f, heute));
+        else f.schritte.abgelehnt = '✓';
+      }
       f.info = notizen.filter(Boolean).join(' · ');
       f.offene_punkte = punkte.filter(Boolean).join(' · ');
       if (!f.art && (f.kwp || f.speicher)) f.art = f.speicher ? 'PV + Speicher' : 'PV';
@@ -245,13 +264,14 @@
   }
 
   // Liest die ganze Mappe und führt Einträge zusammen
-  function analysiere(buffer, standardJahr) {
+  function analysiere(buffer, standardJahr, heute) {
+    heute = heute || heuteText();
     const X = window.XLSX;
     const wb = X.read(buffer, { type: 'array', cellDates: false, cellStyles: true });
     const infos = (wb.Workbook && wb.Workbook.Sheets) || [];
     const blaetter = [];
     wb.SheetNames.forEach((name, i) => {
-      const b = leseBlatt(wb.Sheets[name], name, !!(infos[i] && infos[i].Hidden), standardJahr);
+      const b = leseBlatt(wb.Sheets[name], name, !!(infos[i] && infos[i].Hidden), standardJahr, heute);
       if (b) blaetter.push(b);
     });
     const listen = blaetter.filter(b => !b.zuteilung).sort((a, b) => (a.versteckt - b.versteckt));
@@ -295,13 +315,23 @@
   }
 
   // Vergleich mit dem, was schon in der Datenbank ist
-  function abgleich(eintraege, bestand) {
+  function abgleich(eintraege, bestand, heute) {
+    heute = heute || heuteText();
     const neu = [], ergaenzen = [], gleich = [];
     eintraege.forEach(f => {
       const t = bestand.find(b => !b.geloescht_am && b.jahr === f.jahr && gleicherKunde(b, f));
       if (!t) { neu.push(f); return; }
       const patch = ergaenze(t, f);
-      if (Object.keys(patch).length) ergaenzen.push({ ziel: t, patch, quelle: f });
+      let neuAngesucht = false;
+      // In der Liste orange (abgelehnt), in der App noch im alten Call: Ticket/Einreichung zurück,
+      // in den offenen Call. Nur einmal – steht der Eintrag schon im neuen Call, bleibt er.
+      if (f._abgelehntIm && t.foerdercall === f._abgelehntIm && !(t.schritte || {}).frueher_abgelehnt) {
+        const basis = Object.assign({}, t, patch, { schritte: Object.assign({}, t.schritte || {}, patch.schritte || {}) });
+        if (offenerCall(heute)) Object.assign(patch, neuAnsuchen(basis, heute));
+        else patch.schritte = Object.assign({}, basis.schritte, { abgelehnt: '✓' });
+        neuAngesucht = true;
+      }
+      if (Object.keys(patch).length) ergaenzen.push({ ziel: t, patch, quelle: f, neuAngesucht });
       else gleich.push(f);
     });
     return { neu, ergaenzen, gleich };
@@ -313,5 +343,5 @@
     return r;
   }
 
-  window.EAG_IMPORT = { analysiere, abgleich, sauber };
+  window.EAG_IMPORT = { analysiere, abgleich, sauber, ergaenze, vorherigeAbhaken };
 })();
