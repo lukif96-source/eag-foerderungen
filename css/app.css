@@ -729,3 +729,29 @@ body.demo .kopf::after { content: "DEMO – keine echten Daten"; position: absol
   .tr-kopf b { display: none; }
   .tr-ph:not(.tr-aktiv):not(.tr-luecke) .tr-kopf span { visibility: hidden; }
 }
+
+/* Ticket-Tag: je Ticket eine Karte mit Kopier-Knöpfen (Tasten 1–7) und „gezogen von“ */
+.tt-nachtrag { border-left-color: var(--amber); }
+.tk-liste { display: grid; gap: 6px; }
+.tk { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--linie); border-radius: 10px; background: var(--flaeche); }
+.tk:focus-visible, .tk:focus-within { outline: none; border-color: var(--text-3); box-shadow: 0 0 0 3px var(--linie-2); }
+.tk-fertig { background: #fafbf9; }
+.tk-kopf { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tk-name { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; font-size: 14.5px; color: var(--text); cursor: pointer; text-align: left; }
+.tk-name:hover { text-decoration: underline; }
+.tk-meta { font-size: 12.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.tk-stand { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.tk-stand .erledigt { height: 32px; padding: 0 12px; font-size: 13px; }
+.tk-ok { display: inline-flex; align-items: center; gap: 4px; color: var(--gruen-dunkel); font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; }
+.tk-ok svg { width: 15px; height: 15px; stroke-width: 2.6; }
+.tk-von-text { font-size: 12.5px; color: var(--text-3); }
+.tk-von { height: 32px; border: 1px solid var(--linie); border-radius: 8px; background: var(--flaeche); padding: 0 26px 0 8px; font-size: 13px; cursor: pointer; }
+.tk-plan { font-size: 12px; color: var(--text-3); }
+.tk-kopien { display: flex; flex-wrap: wrap; gap: 4px; }
+.tk-kopie { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px 0 4px; border: 1px solid var(--linie); border-radius: 7px; background: var(--flaeche); font-size: 12.5px; color: var(--text); cursor: pointer; transition: background .12s, border-color .12s; }
+.tk-kopie kbd { min-width: 18px; height: 18px; display: inline-grid; place-content: center; border-radius: 4px; background: var(--linie-2); font: 600 11px/1 inherit; color: var(--text-2); }
+.tk-kopie:hover:not(:disabled) { border-color: var(--text-3); }
+.tk-kopie:disabled { opacity: .4; cursor: default; }
+.tk-kopie.kopiert { background: var(--gruen-hell); border-color: var(--gruen); color: var(--gruen-dunkel); }
+.tk-kopie.kopiert kbd { background: var(--gruen); color: #fff; }
+@media (max-width: 760px) { .tk-stand { margin-left: 0; width: 100%; justify-content: flex-start; } }

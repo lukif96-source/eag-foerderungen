@@ -13,6 +13,7 @@
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
   const esc = s => String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const heute = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const uhrJetzt = () => new Date().toTimeString().slice(0, 8);
   const datumDE = v => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v || ''); return m ? `${m[3]}.${m[2]}.${m[1]}` : (v || ''); };
   const zahlDE = v => (v === null || v === undefined || v === '') ? '' : Number(v).toLocaleString('de-AT', { maximumFractionDigits: 2 });
   const speicherLokal = {
@@ -431,25 +432,96 @@
     if (gespeichert && gespeichert.length) return gespeichert;
     return Array.from(new Set(ticketKandidaten(call).map(d => (d.zieher || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'de'));
   }
+  // Alle Tickets des Calls (auch schon gezogene) – für die Karte am Ticket-Tag und am Tag danach
+  function ticketTagListe(call) {
+    return S.daten.filter(d => !d.geloescht_am && d.foerdercall === call && !E.status(d).ende)
+      .sort((a, b) => (a.zieher || '').localeCompare(b.zieher || '', 'de') || (a.kunde || '').localeCompare(b.kunde || '', 'de'));
+  }
+  const gezogen = d => !!(d.schritte || {}).ticket;
+  // Kopier-Felder in der Reihenfolge, in der sie im Portal gebraucht werden (Tasten 1–7)
+  const KOPIER = [
+    ['Zählpunkt', d => String(d.zaehlpunkt || '').replace(/\s/g, '').toUpperCase().replace(/^(?!AT)(\d{11})/, 'AT$1')],
+    ['Kunde', d => d.kunde], ['Straße', d => d.strasse], ['PLZ', d => d.plz], ['Ort', d => d.ort],
+    ['kWp', d => d.kwp === null || d.kwp === undefined || d.kwp === '' ? '' : zahlDE(d.kwp)],
+    ['FPJ', d => d.fpj || d.projekt_nr]
+  ];
+  function ticketKarteHtml(d, namen, bearbeiten, phase) {
+    const s = d.schritte || {};
+    const z = E.zuschuss(d);
+    const wer = (d.zieher || '').trim();
+    const auswahl = `<select class="tk-von" data-tk-von title="Wer hat das Ticket gezogen?" ${bearbeiten ? '' : 'disabled'}>
+      ${Array.from(new Set([wer, ...namen].filter(Boolean))).map(n => `<option ${n === wer ? 'selected' : ''}>${esc(n)}</option>`).join('')}
+      ${wer ? '' : '<option selected value="">– wer? –</option>'}</select>`;
+    const stand = gezogen(d)
+      ? `<span class="tk-ok"><svg><use href="#i-check"/></svg>${s.ticket_uhrzeit ? esc(s.ticket_uhrzeit) : esc(datumDE(s.ticket))}</span><span class="tk-von-text">von</span>${auswahl}`
+        + (s.zieher_geplant ? `<span class="tk-plan" title="So war es gewürfelt">statt ${esc(s.zieher_geplant)}</span>` : '')
+      : bearbeiten && phase !== 'vorher' ? `${auswahl}<button class="erledigt" data-tk-gezogen><svg><use href="#i-check"/></svg>Gezogen</button>` : `<span class="tk-plan">${esc(wer || 'ohne Zieher')}</span>`;
+    return `<div class="tk ${gezogen(d) ? 'tk-fertig' : ''}" data-id="${d.id}" tabindex="0">
+      <div class="tk-kopf"><button class="tk-name" data-oeffnen-tk>${esc(d.kunde || '(ohne Namen)')}</button>
+        <span class="tk-meta">${esc([z ? 'Kat. ' + z.kat : '', d.kwp ? zahlDE(d.kwp) + ' kWp' : '', d.speicher || ''].filter(Boolean).join(' · '))}</span>
+        <span class="tk-stand">${stand}</span></div>
+      <div class="tk-kopien">${KOPIER.map(([l, f], i) => { const v = f(d); return `<button class="tk-kopie" data-kopie="${i}" ${v ? '' : 'disabled'} title="${esc(v || 'fehlt')} – Taste ${i + 1}"><kbd>${i + 1}</kbd>${esc(l)}</button>`; }).join('')}</div>
+    </div>`;
+  }
   function ticketTagHtml() {
     const call = E.naechsterTicketTag(heute());
     if (!call) return '';
+    const phase = E.ticketTagPhase(call, heute());
+    const alle = ticketTagListe(call);
     const k = ticketKandidaten(call);
-    if (!k.length) return '';
+    if (!alle.length || (phase === 'vorher' && !k.length)) return '';
     const namen = ticketZieherNamen(call);
-    const zahl = n => k.filter(d => (d.zieher || '').trim() === n).length;
+    const zahl = n => alle.filter(d => (d.zieher || '').trim() === n).length;
+    const zahlGezogen = n => alle.filter(d => (d.zieher || '').trim() === n && gezogen(d)).length;
     const ohne = k.filter(d => !namen.includes((d.zieher || '').trim())).length;
+    const nGezogen = alle.filter(gezogen).length;
     const tage = Math.round((Date.parse(call) - Date.parse(heute())) / 864e5);
     const bearbeiten = darf('bearbeiten');
-    return `<section class="tt">
-      <div class="tt-kopf"><svg><use href="#i-dice"/></svg><div><b>Ticket-Tag ${esc(datumDE(call))} · ab 17:00 Uhr</b>
-        <span>${k.length} Tickets · ${tage === 0 ? 'heute' : tage === 1 ? 'morgen' : `in ${tage} Tagen`}${ohne ? ` · <b class="rot">${ohne} noch ohne Zieher</b>` : ' · alle verteilt'}</span></div>
-        ${k.length ? '<button class="g-knopf" data-aktion="zieher-excel"><svg><use href="#i-download"/></svg>Excel je Zieher</button>' : ''}</div>
-      ${namen.length ? `<div class="tt-namen">${namen.map(n => `<button class="tt-chip ${S.filter.zieher === n && S.filter.call === call ? 'aktiv' : ''}" data-zieher="${esc(n)}">${esc(n)}<b>${zahl(n)}</b></button>`).join('')}</div>` : ''}
-      ${bearbeiten ? `<form class="tt-form" id="tt-form"><input id="tt-namen" class="sp-inp" value="${esc(namen.join(', '))}" placeholder="Namen der Ticket-Zieher, mit Komma getrennt – z. B. Verena, Bianca, Thomas" autocomplete="off">
+    const titel = phase === 'nachtrag' ? `Ticket-Tag ${datumDE(call)} – heute eintragen, wer gezogen hat`
+      : `Ticket-Tag ${datumDE(call)} · ab 17:00 Uhr`;
+    const unter = phase === 'vorher'
+      ? `${k.length} Tickets · ${tage === 1 ? 'morgen' : `in ${tage} Tagen`}${ohne ? ` · <b class="rot">${ohne} noch ohne Zieher</b>` : ' · alle verteilt'}`
+      : `${nGezogen} von ${alle.length} gezogen${phase === 'heute' ? ' · heute' : ' · die Liste bleibt nur noch heute'}${ohne ? ` · <b class="rot">${ohne} ohne Zieher</b>` : ''}`;
+    const sichtbar = phase === 'vorher' ? [] : alle.filter(d => !S.filter.zieher || (d.zieher || '').trim() === S.filter.zieher);
+    return `<section class="tt tt-${phase}">
+      <div class="tt-kopf"><svg><use href="#i-dice"/></svg><div><b>${esc(titel)}</b><span>${unter}</span></div>
+        <button class="g-knopf" data-aktion="zieher-excel"><svg><use href="#i-download"/></svg>Excel je Zieher</button></div>
+      ${namen.length ? `<div class="tt-namen">${namen.map(n => `<button class="tt-chip ${S.filter.zieher === n && S.filter.call === call ? 'aktiv' : ''}" data-zieher="${esc(n)}">${esc(n)}<b>${phase === 'vorher' ? zahl(n) : `${zahlGezogen(n)}/${zahl(n)}`}</b></button>`).join('')}</div>` : ''}
+      ${bearbeiten && phase !== 'nachtrag' ? `<form class="tt-form" id="tt-form"><input id="tt-namen" class="sp-inp" value="${esc(namen.join(', '))}" placeholder="Namen der Ticket-Zieher, mit Komma getrennt – z. B. Verena, Bianca, Thomas" autocomplete="off">
         <button class="btn btn-primaer" type="submit"><svg><use href="#i-dice"/></svg>Verteilen</button></form>
         <p class="tt-hilfe">Neue Namen eintragen und Enter: Wer noch keinen Zieher hat, wird zufällig und gleichmäßig verteilt. Fällt ein Name weg, werden seine Tickets neu verteilt. Bestehende Zuteilungen bleiben.</p>` : ''}
+      ${sichtbar.length ? `<div class="tk-liste">${sichtbar.map(d => ticketKarteHtml(d, namen, bearbeiten, phase)).join('')}</div>
+        <p class="tt-hilfe">Ziffern 1–7 kopieren das Feld der markierten Karte. „Gezogen“ speichert Datum, Uhrzeit und wer gezogen hat – zieht jemand anderer, vorher den Namen umstellen.</p>` : ''}
     </section>`;
+  }
+  async function ticketSpeichern(id, patchFn, meldung) {
+    const d = S.daten.find(x => x.id === id);
+    if (!d) return;
+    try {
+      Object.assign(d, await Q.aendern(id, patchFn(d), d.geaendert_am));
+      toast(meldung(d), 'ok');
+      fuelleFilter(); zeichne();
+    } catch (e) {
+      if (e.konflikt) { toast('Der Eintrag wurde gerade von jemand anderem geändert – Liste neu geladen.', 'fehler'); laden(); }
+      else toast(E.fehlerText(e), 'fehler');
+    }
+  }
+  const ticketUhrzeit = d => d.foerdercall === heute() ? uhrJetzt() : '';
+  function ticketGezogenSpeichern(id, von) {
+    const d = S.daten.find(x => x.id === id);
+    if (d && !String(von || '').trim() && !String(d.zieher || '').trim()) { toast('Bitte zuerst auswählen, wer das Ticket gezogen hat.', 'fehler'); return; }
+    return ticketSpeichern(id, d => E.ticketGezogen(d, von, heute(), ticketUhrzeit(d)),
+      d => `${d.kunde}: Ticket gezogen von ${d.zieher}${d.schritte.ticket_uhrzeit ? ' um ' + d.schritte.ticket_uhrzeit : ''} ✓`);
+  }
+  function gezogenVonSpeichern(id, von) {
+    return ticketSpeichern(id, d => E.gezogenVon(d, von), d => `${d.kunde}: gezogen von ${d.zieher}`);
+  }
+  async function kopieren(knopf, wert) {
+    try { await navigator.clipboard.writeText(wert); } catch (e) {
+      const t = document.createElement('textarea'); t.value = wert; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove();
+    }
+    knopf.classList.add('kopiert');
+    setTimeout(() => knopf.classList.remove('kopiert'), 900);
   }
   async function ticketZieherSpeichern(text) {
     const call = E.naechsterTicketTag(heute());
@@ -526,6 +598,7 @@
   async function schnellErledigt(id, key) {
     const d = S.daten.find(x => x.id === id);
     if (!d) return;
+    if (key === 'ticket') return ticketGezogenSpeichern(id, d.zieher);
     try {
       const neu = await Q.aendern(id, { schritte: Object.assign({}, d.schritte || {}, { [key]: heute() }) }, d.geaendert_am);
       Object.assign(d, neu);
@@ -590,7 +663,7 @@
 
   function feldHtml(f, rec, nurLesen) {
     const k = f.k, v = rec[k];
-    const label = f.label || FELD_LABEL[k] || k;
+    const label = k === 'zieher' && (rec.schritte || {}).ticket ? 'Ticket gezogen von' : (f.label || FELD_LABEL[k] || k);
     const dis = nurLesen ? 'disabled' : '';
     let inp;
     if (f.typ === 'select') {
@@ -611,6 +684,10 @@
 
   // Prüf-Hinweise direkt unter einem Feld
   function feldHinweis(k, rec) {
+    if (k === 'zieher') {
+      const s = rec.schritte || {};
+      return s.zieher_geplant ? `gewürfelt war ${esc(s.zieher_geplant)}` : '';
+    }
     if (k === 'zaehlpunkt') {
       const p = E.zpPruefung(rec.zaehlpunkt);
       return p === 'ohneAT' ? '31 Stellen ohne „AT“ – im EAG-Portal mit AT davor eintragen'
@@ -652,6 +729,7 @@
         <span>${st.erledigt[i] ? '<svg><use href="#i-check"/></svg>' : i + 1}</span></label>
       <span class="ablauf-titel">${esc(x.label)}${st.luecken.includes(i) ? ' <span class="luecke-text">übersprungen?</span>' : ''}</span>
       <input type="date" class="ablauf-datum" data-schritt-datum="${x.key}" value="${esc(datum)}" ${nurLesen ? 'disabled' : ''} title="Datum">
+      ${x.key === 'ticket' && w && (rec.zieher || (rec.schritte || {}).ticket_uhrzeit) ? `<span class="ablauf-auto">${esc([rec.zieher ? 'von ' + rec.zieher : '', (rec.schritte || {}).ticket_uhrzeit ? 'um ' + rec.schritte.ticket_uhrzeit : ''].filter(Boolean).join(' · '))}</span>` : ''}
       ${w === '✓' ? `<span class="ablauf-auto">${x.key === 'vertrag_erhalten' ? 'erledigt, Datum unbekannt – optional, macht die Fristen genau' : 'erledigt, Datum unbekannt'}</span>` : hilfe}</li>`;
   }
 
@@ -801,6 +879,7 @@
       const key = el.dataset.schritt;
       const s = Object.assign({}, rec.schritte);
       if (el.checked) s[key] = heute(); else delete s[key];
+      if (key === 'ticket') { if (el.checked && ticketUhrzeit(rec)) s.ticket_uhrzeit = uhrJetzt(); else if (!el.checked) delete s.ticket_uhrzeit; }
       rec.schritte = s;
       ablaufNeu();
     } else if (el.dataset.schrittDatum) {
@@ -1408,6 +1487,15 @@
         S.filter.call = an ? E.naechsterTicketTag(heute()) || '' : '';
         fuelleFilter(); zeichne(); return;
       }
+      const tk = e.target.closest('.tk[data-id]');
+      if (tk) {
+        const d = S.daten.find(x => x.id === tk.dataset.id);
+        const kopie = e.target.closest('[data-kopie]');
+        if (kopie && d) { kopieren(kopie, KOPIER[+kopie.dataset.kopie][1](d)); return; }
+        if (e.target.closest('[data-tk-gezogen]')) { ticketGezogenSpeichern(tk.dataset.id, $('[data-tk-von]', tk).value); return; }
+        if (e.target.closest('[data-oeffnen-tk]') && d) { oeffne(d); return; }
+        return;
+      }
       const mehr = e.target.closest('[data-mehr]');
       if (mehr) { S.aufgeklappt.add(mehr.dataset.mehr); zeichne(); return; }
       const q = e.target.closest('[data-schnell]');
@@ -1416,12 +1504,25 @@
       if (e.target.closest('[data-neu-ansuchen]') && tr) { e.stopPropagation(); schnellNeuAnsuchen(tr.dataset.id); return; }
       if (tr) oeffne(S.daten.find(d => d.id === tr.dataset.id));
     });
+    $('#liste').addEventListener('change', e => {
+      const sel = e.target.closest('[data-tk-von]');
+      const tk = e.target.closest('.tk[data-id]');
+      const d = tk && S.daten.find(x => x.id === tk.dataset.id);
+      if (sel && d && gezogen(d) && sel.value) gezogenVonSpeichern(d.id, sel.value);
+    });
     $('#liste').addEventListener('submit', e => {
       if (e.target.id !== 'tt-form') return;
       e.preventDefault();
       ticketZieherSpeichern($('#tt-namen').value);
     });
     $('#liste').addEventListener('keydown', e => {
+      const tk = e.target.closest('.tk[data-id]');
+      if (tk && /^[1-7]$/.test(e.key) && !e.ctrlKey && !e.metaKey && e.target.tagName !== 'SELECT') {
+        const d = S.daten.find(x => x.id === tk.dataset.id);
+        const knopf = $(`[data-kopie="${+e.key - 1}"]`, tk);
+        if (d && knopf && !knopf.disabled) { e.preventDefault(); kopieren(knopf, KOPIER[+e.key - 1][1](d)); }
+        return;
+      }
       const tr = e.target.closest('tr[data-id], .zeile[data-id], .z[data-id]');
       if (tr && e.key === 'Enter' && e.target === tr) oeffne(S.daten.find(d => d.id === tr.dataset.id));
     });
@@ -1449,7 +1550,8 @@
       }
       const b = e.target.closest('[data-jetzt]');
       if (!b || !S.detail) return;
-      S.detail.rec.schritte = Object.assign({}, S.detail.rec.schritte, { [b.dataset.jetzt]: heute() });
+      if (b.dataset.jetzt === 'ticket') Object.assign(S.detail.rec, E.ticketGezogen(S.detail.rec, S.detail.rec.zieher, heute(), ticketUhrzeit(S.detail.rec)));
+      else S.detail.rec.schritte = Object.assign({}, S.detail.rec.schritte, { [b.dataset.jetzt]: heute() });
       speichern();
     });
     $('#detail').addEventListener('click', e => {

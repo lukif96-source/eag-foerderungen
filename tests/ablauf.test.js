@@ -208,7 +208,8 @@ test('Fehlende Daten zählen nur bis zum Ticket und nur, solange der Call nicht 
 test('Ticket-Zieher braucht es nur bis zum Ticket-Tag', () => {
   assert.equal(A.naechsterTicketTag('2026-10-01'), '2026-10-08');
   assert.equal(A.naechsterTicketTag('2026-10-08'), '2026-10-08');
-  assert.equal(A.naechsterTicketTag('2026-10-09'), null);
+  assert.equal(A.naechsterTicketTag('2026-10-09'), '2026-10-08');   // Tag danach: nachtragen
+  assert.equal(A.naechsterTicketTag('2026-10-10'), null);
   assert.equal(A.IDX.aufgeteilt, undefined);   // kein eigener Schritt mehr
 });
 
@@ -274,4 +275,41 @@ test('Tracker: abgelehnt und ausgezahlt haben keine Aktion', () => {
   assert.equal(fertig.zustand, 'fertig');
   assert.equal(fertig.erledigt, A.SCHRITTE.length);
   assert.ok(fertig.phasen.every(p => p.zustand === 'fertig'));
+});
+
+// ── Ticket gezogen ────────────────────────────────────────────────
+test('Ticket-Tag-Phasen: vorher, heute, Nachtrag am Tag danach, dann vorbei', () => {
+  assert.equal(A.ticketTagPhase('2026-10-08', '2026-10-01'), 'vorher');
+  assert.equal(A.ticketTagPhase('2026-10-08', '2026-10-08'), 'heute');
+  assert.equal(A.ticketTagPhase('2026-10-08', '2026-10-09'), 'nachtrag');
+  assert.equal(A.ticketTagPhase('2026-10-08', '2026-10-10'), null);
+});
+
+test('Ticket gezogen von jemand anderem: Zieher wird die Person, Würfel-Zuteilung bleibt gemerkt', () => {
+  const f = basis({ projekt: '✓' });                            // gewürfelt: Verena
+  const p = A.ticketGezogen(f, 'Bianca', '2026-10-08', '17:00:04');
+  assert.equal(p.zieher, 'Bianca');
+  assert.equal(p.schritte.ticket, '2026-10-08');
+  assert.equal(p.schritte.ticket_uhrzeit, '17:00:04');
+  assert.equal(p.schritte.zieher_geplant, 'Verena');
+  assert.equal(f.schritte.ticket, undefined);                    // Original unverändert
+  // Zurück auf die gewürfelte Person → kein Vermerk mehr
+  const zurueck = A.gezogenVon(Object.assign({}, f, p), 'Verena');
+  assert.equal(zurueck.zieher, 'Verena');
+  assert.equal(zurueck.schritte.zieher_geplant, undefined);
+});
+
+test('Ticket gezogen ohne Namen = gewürfelte Person; vorhandenes Ticket-Datum bleibt', () => {
+  const p = A.ticketGezogen(basis({ projekt: '✓', ticket: '2026-10-08' }), '', '2026-10-09', 'kaputt');
+  assert.equal(p.zieher, 'Verena');
+  assert.equal(p.schritte.ticket, '2026-10-08');
+  assert.equal(p.schritte.ticket_uhrzeit, undefined);
+  assert.equal(p.schritte.zieher_geplant, undefined);
+});
+
+test('Neu ansuchen löscht auch Uhrzeit und Würfel-Vermerk des alten Tickets', () => {
+  const f = basis({ projekt: '✓', ticket: '2026-06-16', ticket_uhrzeit: '17:00:02', zieher_geplant: 'Thomas', abgelehnt: '2026-07-10' }, { foerdercall: '2026-06-16' });
+  const p = A.neuAnsuchen(f, '2026-10-01');
+  assert.equal(p.schritte.ticket_uhrzeit, undefined);
+  assert.equal(p.schritte.zieher_geplant, undefined);
 });

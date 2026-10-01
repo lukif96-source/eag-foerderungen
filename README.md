@@ -47,11 +47,13 @@ solange sie noch vor uns liegt; bei alten Förderungen bleibt die Frist leise �
 **Ausgezahlt = fertig**, egal was davor fehlt. Fehlende Kundendaten zählen nur bis zum Ticket und nur,
 solange der Call nicht vorbei ist.
 
-**Ticket-Tag** (8.10.2026, ab 17:00): Bis einschließlich dem Calltag steht oben unter „Zu tun“ eine Karte.
-Namen der Ticket-Zieher eintragen (mit Komma) und Enter → wer noch keinen Zieher hat, wird zufällig und
-gleichmäßig zugewürfelt; fällt ein Name weg, werden seine Tickets neu verteilt. Klick auf einen Namen zeigt
-nur seine Tickets, „Excel je Zieher“ macht eine Liste pro Person. Ab dem Tag danach ist die Karte weg –
-die Zuteilung ist kein eigener Schritt mehr.
+**Ticket-Tag** (8.10.2026, ab 17:00): Bis einschließlich dem Tag danach (9.10.) steht oben unter „Zu tun“ eine Karte.
+Vorher: Namen der Ticket-Zieher eintragen (mit Komma) und Enter → wer noch keinen Zieher hat, wird zufällig und
+gleichmäßig zugewürfelt; fällt ein Name weg, werden seine Tickets neu verteilt. Am Calltag und am Tag danach zeigt die
+Karte jedes Ticket mit Kopier-Knöpfen in Portal-Reihenfolge (Tasten 1–7: Zählpunkt, Kunde, Straße, PLZ, Ort, kWp, FPJ)
+und „Gezogen“: gespeichert werden Datum, Uhrzeit (am Calltag) und **wer wirklich gezogen hat**. Zieht jemand anderer,
+vorher den Namen umstellen – der Zieher wird zu dieser Person, die gewürfelte Zuteilung bleibt als „gewürfelt war …“
+in der Akte. Am 9.10. heißt die Karte „heute eintragen, wer gezogen hat“; ab 10.10. ist sie weg.
 
 Excel-Import: orange-rot markierte Zeilen (abgelehnt) kommen direkt in den offenen Call;
 schon importierte Einträge werden beim erneuten Import einmalig umgestellt.

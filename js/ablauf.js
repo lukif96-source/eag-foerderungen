@@ -54,7 +54,9 @@
     nachforderung: 'Nachforderung erhalten',
     nachgereicht: 'Unterlagen nachgereicht',
     verlaengert_bis: 'Inbetriebnahme-Frist verlängert bis',
-    frueher_abgelehnt: 'Früher abgelehnt im Call'
+    frueher_abgelehnt: 'Früher abgelehnt im Call',
+    ticket_uhrzeit: 'Ticket gezogen um',
+    zieher_geplant: 'Ticket-Zieher laut Würfel'
   };
 
   // ---------------------------------------------------------------
@@ -276,10 +278,38 @@
     return Object.keys(CALLS).sort().find(c => CALLS[c] >= heute) || null;
   }
 
-  // Ticket-Tag, der noch bevorsteht (bis einschließlich Calltag) – nur bis dahin braucht es Ticket-Zieher
+  // Ticket-Tag, der noch bevorsteht – die Würfel-Matrix bleibt bis einschließlich zum Tag danach
+  // (09.10. beim Call am 08.10.), damit eingetragen werden kann, wer wirklich gezogen hat.
   function naechsterTicketTag(heute) {
     heute = heute || heuteText();
-    return Object.keys(CALLS).sort().find(c => c >= heute) || null;
+    return Object.keys(CALLS).sort().find(c => plusTage(c, 1) >= heute) || null;
+  }
+  // 'vorher' (verteilen), 'heute' (ziehen), 'nachtrag' (Tag danach: nachtragen, wer gezogen hat), sonst null
+  function ticketTagPhase(call, heute) {
+    heute = heute || heuteText();
+    if (!istDatum(call)) return null;
+    return heute < call ? 'vorher' : heute === call ? 'heute' : heute === plusTage(call, 1) ? 'nachtrag' : null;
+  }
+
+  // Ticket gezogen: Datum, Uhrzeit (nur am Calltag sinnvoll) und wer wirklich gezogen hat.
+  // Der Zieher wird zur Person, die gezogen hat; die gewürfelte Zuteilung bleibt in schritte.zieher_geplant.
+  function ticketGezogen(f, von, datum, uhrzeit) {
+    const s = Object.assign({}, f.schritte || {});
+    const geplant = String(f.zieher || '').trim();
+    von = String(von || '').trim() || geplant;
+    s.ticket = istDatum(s.ticket) ? s.ticket : datum;
+    if (uhrzeit && /^\d{2}:\d{2}(:\d{2})?$/.test(uhrzeit)) s.ticket_uhrzeit = uhrzeit;
+    if (geplant && von !== geplant && !s.zieher_geplant) s.zieher_geplant = geplant;
+    if (s.zieher_geplant === von) delete s.zieher_geplant;
+    return { zieher: von, schritte: s };
+  }
+  // Nur „wer hat gezogen“ ändern (Ticket bleibt, wie es ist)
+  function gezogenVon(f, von) {
+    const s = Object.assign({}, f.schritte || {});
+    const geplant = s.zieher_geplant || String(f.zieher || '').trim();
+    von = String(von || '').trim();
+    if (geplant && von !== geplant) s.zieher_geplant = geplant; else delete s.zieher_geplant;
+    return { zieher: von, schritte: s };
   }
 
   // Ticket-Zieher verteilen: wer noch keinen (gültigen) Zieher hat, kommt reihum zu dem mit den wenigsten.
@@ -306,7 +336,7 @@
     const s = Object.assign({}, f.schritte || {});
     const frueher = (s.frueher_abgelehnt || '').split(',').map(x => x.trim()).filter(Boolean);
     if (istDatum(f.foerdercall) && f.foerdercall !== call && !frueher.includes(f.foerdercall)) frueher.push(f.foerdercall);
-    ['ticket', 'eingereicht', 'abgelehnt', 'nachforderung', 'nachgereicht'].forEach(k => { delete s[k]; });
+    ['ticket', 'ticket_uhrzeit', 'zieher_geplant', 'eingereicht', 'abgelehnt', 'nachforderung', 'nachgereicht'].forEach(k => { delete s[k]; });
     if (frueher.length) s.frueher_abgelehnt = frueher.join(', ');
     return { foerdercall: call, ticket: '', schritte: s };
   }
@@ -368,7 +398,7 @@
   const API = {
     PHASEN, SCHRITTE, IDX, ENDE, NEBEN, CALLS, LETZTER_CALL, PFLICHT, FELDER, SAETZE_2026,
     leer, istDatum, plusTage, plusMonate, heuteText, callEnde, fehlendeDaten, datenFehlen, schrittWert, status, aufgabe,
-    inbetriebnahmeFrist, fristen, tracker, offenerCall, naechsterTicketTag, zieherVerteilen, neuAnsuchen, zpPruefung, kategorie, zuschuss,
+    inbetriebnahmeFrist, fristen, tracker, offenerCall, naechsterTicketTag, ticketTagPhase, ticketGezogen, gezogenVon, zieherVerteilen, neuAnsuchen, zpPruefung, kategorie, zuschuss,
     nameTokens, zpNorm, gleicherKunde
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
