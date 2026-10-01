@@ -21,7 +21,6 @@
   // neu    = gab es in alten Datensätzen nicht – fehlt er, ist das keine Lücke
   const SCHRITTE = [
     { key: 'daten', phase: 'vor', label: 'Daten erfasst', todo: 'Daten erfassen', knopf: 'Ergänzen', kurz: 'Daten', auto: true },
-    { key: 'aufgeteilt', phase: 'vor', label: 'Aufgeteilt', todo: 'Aufteilen', knopf: 'Zuteilen', kurz: 'Aufgeteilt', auto: true },
     { key: 'projekt', phase: 'vor', label: 'Projekt im EAG-Portal angelegt', todo: 'Projekt im EAG-Portal anlegen', knopf: 'Projekt angelegt', kurz: 'Projekt',
       hilfe: 'Geht schon vor dem Call und spart am Ticket-Tag Zeit.' },
     { key: 'ticket', phase: 'call', label: 'Ticket gezogen', todo: 'Ticket ziehen', knopf: 'Ticket gezogen', kurz: 'Ticket',
@@ -113,7 +112,6 @@
 
   function schrittWert(f, key) {
     if (key === 'daten') return fehlendeDaten(f).length === 0 ? '✓' : '';
-    if (key === 'aufgeteilt') return leer(f.zieher) ? '' : '✓';
     const v = (f.schritte || {})[key];
     return leer(v) ? '' : v;
   }
@@ -206,6 +204,29 @@
     return Object.keys(CALLS).sort().find(c => CALLS[c] >= heute) || null;
   }
 
+  // Ticket-Tag, der noch bevorsteht (bis einschließlich Calltag) – nur bis dahin braucht es Ticket-Zieher
+  function naechsterTicketTag(heute) {
+    heute = heute || heuteText();
+    return Object.keys(CALLS).sort().find(c => c >= heute) || null;
+  }
+
+  // Ticket-Zieher verteilen: wer noch keinen (gültigen) Zieher hat, kommt reihum zu dem mit den wenigsten.
+  // zufall(n) liefert 0..n-1 (im Browser kryptografisch, in Tests fest). Ergebnis: [{ f, zieher }]
+  function zieherVerteilen(kandidaten, namen, zufall) {
+    zufall = zufall || (n => Math.floor(Math.random() * n));
+    const mischen = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = zufall(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    const z = f => String(f.zieher || '').trim();
+    const anzahl = new Map(namen.map(n => [n, 0]));
+    kandidaten.forEach(f => { if (anzahl.has(z(f))) anzahl.set(z(f), anzahl.get(z(f)) + 1); });
+    const reihe = mischen(namen);
+    return mischen(kandidaten.filter(f => !anzahl.has(z(f)))).map(f => {
+      const min = Math.min(...reihe.map(n => anzahl.get(n)));
+      const n = reihe.find(x => anzahl.get(x) === min);
+      anzahl.set(n, anzahl.get(n) + 1);
+      return { f, zieher: n };
+    });
+  }
+
   // Liefert die Änderung (patch) oder wirft, wenn kein Call mehr offen ist
   function neuAnsuchen(f, heute) {
     const call = offenerCall(heute);
@@ -275,7 +296,7 @@
   const API = {
     PHASEN, SCHRITTE, IDX, ENDE, NEBEN, CALLS, LETZTER_CALL, PFLICHT, FELDER, SAETZE_2026,
     leer, istDatum, plusTage, plusMonate, heuteText, callEnde, fehlendeDaten, schrittWert, status, aufgabe,
-    inbetriebnahmeFrist, fristen, offenerCall, neuAnsuchen, zpPruefung, kategorie, zuschuss,
+    inbetriebnahmeFrist, fristen, offenerCall, naechsterTicketTag, zieherVerteilen, neuAnsuchen, zpPruefung, kategorie, zuschuss,
     nameTokens, zpNorm, gleicherKunde
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;

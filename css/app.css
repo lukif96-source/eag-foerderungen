@@ -675,3 +675,28 @@ body.demo .kopf::after { content: "DEMO – keine echten Daten"; position: absol
 #extra-filter { display: block; }
 #extra-filter .phasen { width: 100%; }
 .g-frist { margin-left: 2px; }
+
+/* Ticket-Tag: nur bis zum Calltag sichtbar. Namen eintragen → zugewürfelt */
+.tt { background: #fff; border: 1px solid var(--linie); border-left: 4px solid var(--blau); border-radius: 12px; padding: 14px 16px; margin-bottom: 18px; display: grid; gap: 12px; }
+.tt-kopf { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tt-kopf > svg { width: 34px; height: 34px; padding: 7px; border-radius: 9px; background: var(--blau-hell); color: var(--blau); fill: none; stroke: currentColor; stroke-width: 1.8; flex: none; }
+.tt-kopf > div { display: grid; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.tt-kopf > div > b { font-size: 15px; }
+.tt-kopf > div > span { font-size: 13px; color: var(--text-2); }
+.tt-namen { display: flex; flex-wrap: wrap; gap: 6px; }
+.tt-chip { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 12px; border-radius: 99px; border: 1px solid var(--linie); background: #fff; font: inherit; font-size: 13px; font-weight: 500; color: var(--text); cursor: pointer; }
+.tt-chip b { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 99px; background: var(--blau-hell); color: var(--blau); font-size: 12px; display: inline-grid; place-content: center; font-variant-numeric: tabular-nums; }
+.tt-chip:hover { border-color: #c6ccc3; }
+.tt-chip.aktiv { border-color: var(--blau); background: var(--blau-hell); color: var(--blau); }
+.tt-chip.aktiv b { background: var(--blau); color: #fff; }
+.tt-form { display: flex; gap: 8px; }
+.tt-form input { flex: 1; min-width: 0; height: 38px; border: 1px solid var(--linie); border-radius: 9px; padding: 0 12px; font: inherit; background: #fff; color: var(--text); }
+.tt-form input:focus { outline: none; border-color: var(--blau); box-shadow: 0 0 0 3px var(--blau-hell); }
+.tt-form .btn { height: 38px; white-space: nowrap; }
+.tt-hilfe { margin: -4px 0 0; font-size: 12px; color: var(--text-3); }
+@media (max-width: 760px) {
+  .tt-kopf .g-knopf { margin-left: 0; }
+  .tt-form { flex-direction: column; }
+  .tt-form input { flex: none; }
+  .tt-form .btn { justify-content: center; }
+}

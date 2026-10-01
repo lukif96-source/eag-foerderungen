@@ -170,3 +170,21 @@ test('Unbekannte Frist nennt das frühestmögliche Datum ab Callende', () => {
   assert.match(ibn.hinweis, /frühestens 11\.11\.2026/);
   assert.match(abr.hinweis, /frühestens 11\.05\.2027/);
 });
+
+// ── Ticket-Zieher ─────────────────────────────────────────────────
+test('Ticket-Zieher braucht es nur bis zum Ticket-Tag', () => {
+  assert.equal(A.naechsterTicketTag('2026-10-01'), '2026-10-08');
+  assert.equal(A.naechsterTicketTag('2026-10-08'), '2026-10-08');
+  assert.equal(A.naechsterTicketTag('2026-10-09'), null);
+  assert.equal(A.IDX.aufgeteilt, undefined);   // kein eigener Schritt mehr
+});
+
+test('Verteilen: gleichmäßig, bestehende Zuteilung bleibt, weggefallene Namen werden neu verteilt', () => {
+  const fest = n => 0;   // keine Zufälligkeit im Test
+  const k = [{ zieher: 'Verena' }, { zieher: 'Alt' }, { zieher: '' }, { zieher: '' }, { zieher: '' }, {}];
+  const neu = A.zieherVerteilen(k, ['Verena', 'Bianca', 'Thomas'], fest);
+  assert.equal(neu.length, 5);                               // alle außer der bestehenden Verena-Zuteilung
+  assert.ok(neu.every(x => ['Verena', 'Bianca', 'Thomas'].includes(x.zieher)));
+  const zaehl = {}; [{ zieher: 'Verena' }].concat(neu.map(x => ({ zieher: x.zieher }))).forEach(x => { zaehl[x.zieher] = (zaehl[x.zieher] || 0) + 1; });
+  assert.deepEqual(Object.values(zaehl).sort(), [2, 2, 2]);  // 6 Tickets auf 3 Personen
+});

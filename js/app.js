@@ -49,7 +49,7 @@
       { k: 'art', typ: 'select', optionen: ['', 'PV', 'PV + Speicher', 'Speicher'] },
       { k: 'foerdercall', typ: 'date' },
       { k: 'mitarbeiter', label: 'Mitarbeiter (Verkauf)', liste: 'mitarbeiter' },
-      { k: 'zieher', label: 'Ticket-Zieher (aufgeteilt an)', liste: 'zieher' },
+      { k: 'zieher', label: 'Ticket-Zieher', liste: 'zieher' },
       { k: 'ticket', mono: true }, { k: 'fpj', label: 'FPJ-Nr. (Portal)', mono: true }
     ] },
     { titel: 'Notizen', felder: [
@@ -219,7 +219,7 @@
     opt('#f-call', werte('foerdercall').sort().reverse().concat(S.daten.some(d => !d.foerdercall) ? ['ohne'] : []), 'Alle Fördercalls', v => v === 'ohne' ? 'ohne Fördercall' : 'Call ' + datumDE(v));
     opt('#f-art', werte('art'), 'Alle Arten');
     opt('#f-mitarbeiter', werte('mitarbeiter'), 'Alle Mitarbeiter');
-    opt('#f-zieher', zieherWerte().concat(['–']), 'Alle Ticket-Zieher', v => v === '–' ? 'noch nicht aufgeteilt' : v);
+    opt('#f-zieher', zieherWerte().concat(['–']), 'Alle Ticket-Zieher', v => v === '–' ? 'noch ohne Zieher' : v);
     $('#f-papierkorb').checked = S.filter.papierkorb;
     $('#f-suche').value = S.filter.suche;
   }
@@ -399,8 +399,7 @@
       const eintraege = (gruppen.get(g.key) || []).sort((a, b) => dringlich(a).localeCompare(dringlich(b)) || (a.d.kunde || '').localeCompare(b.d.kunde || '', 'de'));
       if (!eintraege.length) return '';
       const offen = S.aufgeklappt.has(g.key) || eintraege.length <= zeigen + 2;
-      const extra = g.key === 'aufgeteilt' && bearbeiten ? '<button class="g-knopf" data-aktion="wuerfeln"><svg><use href="#i-dice"/></svg>Automatisch aufteilen</button>'
-        : g.key === 'abgelehnt' && bearbeiten && call && eintraege.length > 1 ? `<button class="g-knopf" data-aktion="alle-neu-ansuchen"><svg><use href="#i-restore"/></svg>Alle im Call ${esc(datumDE(call))} neu ansuchen</button>` : '';
+      const extra = g.key === 'abgelehnt' && bearbeiten && call && eintraege.length > 1 ? `<button class="g-knopf" data-aktion="alle-neu-ansuchen"><svg><use href="#i-restore"/></svg>Alle im Call ${esc(datumDE(call))} neu ansuchen</button>` : '';
       const hilfe = g.warten ? 'wartet auf die Förderstelle' : (g.hilfe || '');
       // Gleiche Frist für die ganze Gruppe (z. B. Ticket am Calltag): einmal oben statt in jeder Zeile
       const fristen = eintraege.map(x => E.fristen(x.d, heute())[0] || null);
@@ -416,7 +415,66 @@
       : S.ansicht === 'todo' ? 'Nichts zu tun. Alles, was offen ist, wartet auf die Förderstelle.'
       : S.ansicht === 'warten' ? 'Nichts wartet auf die Förderstelle.'
       : S.ansicht === 'beendet' ? 'Keine abgelehnten oder zurückgezogenen Förderungen.' : 'Noch keine Förderung ausgezahlt.';
-    $('#liste').innerHTML = html.trim() ? html : `<div class="leer-hinweis">${leer}</div>`;
+    $('#liste').innerHTML = (S.ansicht === 'todo' ? ticketTagHtml() : '') + (html.trim() ? html : `<div class="leer-hinweis">${leer}</div>`);
+  }
+
+  // ---------------------------------------------------------------
+  // Ticket-Tag: nur bis zum Calltag. Namen eintragen → sofort verteilt.
+  // ---------------------------------------------------------------
+  function ticketKandidaten(call) {
+    return S.daten.filter(d => !d.geloescht_am && d.foerdercall === call && !E.status(d).ende && E.status(d).hoechster < E.IDX.ticket);
+  }
+  function ticketZieherNamen(call) {
+    const gespeichert = speicherLokal.lesen('zieherliste', null);
+    if (gespeichert && gespeichert.length) return gespeichert;
+    return Array.from(new Set(ticketKandidaten(call).map(d => (d.zieher || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'de'));
+  }
+  function ticketTagHtml() {
+    const call = E.naechsterTicketTag(heute());
+    if (!call) return '';
+    const k = ticketKandidaten(call);
+    if (!k.length) return '';
+    const namen = ticketZieherNamen(call);
+    const zahl = n => k.filter(d => (d.zieher || '').trim() === n).length;
+    const ohne = k.filter(d => !namen.includes((d.zieher || '').trim())).length;
+    const tage = Math.round((Date.parse(call) - Date.parse(heute())) / 864e5);
+    const bearbeiten = darf('bearbeiten');
+    return `<section class="tt">
+      <div class="tt-kopf"><svg><use href="#i-dice"/></svg><div><b>Ticket-Tag ${esc(datumDE(call))} · ab 17:00 Uhr</b>
+        <span>${k.length} Tickets · ${tage === 0 ? 'heute' : tage === 1 ? 'morgen' : `in ${tage} Tagen`}${ohne ? ` · <b class="rot">${ohne} noch ohne Zieher</b>` : ' · alle verteilt'}</span></div>
+        ${k.length ? '<button class="g-knopf" data-aktion="zieher-excel"><svg><use href="#i-download"/></svg>Excel je Zieher</button>' : ''}</div>
+      ${namen.length ? `<div class="tt-namen">${namen.map(n => `<button class="tt-chip ${S.filter.zieher === n && S.filter.call === call ? 'aktiv' : ''}" data-zieher="${esc(n)}">${esc(n)}<b>${zahl(n)}</b></button>`).join('')}</div>` : ''}
+      ${bearbeiten ? `<form class="tt-form" id="tt-form"><input id="tt-namen" class="sp-inp" value="${esc(namen.join(', '))}" placeholder="Namen der Ticket-Zieher, mit Komma getrennt – z. B. Verena, Bianca, Thomas" autocomplete="off">
+        <button class="btn btn-primaer" type="submit"><svg><use href="#i-dice"/></svg>Verteilen</button></form>
+        <p class="tt-hilfe">Neue Namen eintragen und Enter: Wer noch keinen Zieher hat, wird zufällig und gleichmäßig verteilt. Fällt ein Name weg, werden seine Tickets neu verteilt. Bestehende Zuteilungen bleiben.</p>` : ''}
+    </section>`;
+  }
+  async function ticketZieherSpeichern(text) {
+    const call = E.naechsterTicketTag(heute());
+    if (!call) return;
+    const namen = Array.from(new Set(String(text || '').split(/[,;\n]/).map(x => x.trim()).filter(Boolean)));
+    speicherLokal.schreiben('zieherliste', namen);
+    if (!namen.length) { zeichne(); return; }
+    const zuf = n => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % n; };
+    const neu = E.zieherVerteilen(ticketKandidaten(call), namen, zuf);
+    let ok = 0, fehler = 0;
+    for (const { f, zieher } of neu) {
+      try { Object.assign(f, await Q.aendern(f.id, { zieher }, f.geaendert_am)); ok++; } catch (e) { fehler++; }
+    }
+    toast(neu.length ? `${ok} Tickets zugewürfelt${fehler ? `, ${fehler} Fehler – bitte neu laden` : ''}.` : 'Alle Tickets sind schon verteilt.', fehler ? 'fehler' : 'ok');
+    fuelleFilter(); zeichne();
+  }
+  function zieherExcel() {
+    const call = E.naechsterTicketTag(heute());
+    if (!call) return;
+    const verteilung = new Map();
+    ticketKandidaten(call).forEach(d => {
+      const n = (d.zieher || '').trim() || 'ohne Zieher';
+      if (!verteilung.has(n)) verteilung.set(n, []);
+      verteilung.get(n).push(d);
+    });
+    wurf = { call, verteilung, rest: [] };
+    wuerfelExcel();
   }
 
   function fortschritt(d, st) {
@@ -575,7 +633,8 @@
   function schrittZeile(rec, st, x, i, nurLesen) {
     const w = E.schrittWert(rec, x.key);
     const cls = st.erledigt[i] ? 'ok' : (i === st.naechster ? 'naechst' : (st.luecken.includes(i) ? 'luecke' : ''));
-    const hilfe = i === st.naechster && x.hilfe ? `<span class="ablauf-auto">${esc(x.hilfe)}</span>` : '';
+    const hilfe = i === st.naechster && (x.hilfe || (x.key === 'ticket' && rec.zieher))
+      ? `<span class="ablauf-auto">${x.key === 'ticket' && rec.zieher ? 'Zieht: ' + esc(rec.zieher) + '. ' : ''}${esc(x.hilfe || '')}</span>` : '';
     if (x.auto) {
       let txt;
       if (x.key === 'daten') { const fehlt = E.fehlendeDaten(rec); txt = fehlt.length ? 'fehlt: ' + fehlt.join(', ') : 'vollständig'; }
@@ -642,8 +701,7 @@
     }
     const n = E.aufgabe(rec, st);
     const fr = E.fristen(rec, heute())[0];
-    const hinweis = n.key === 'daten' ? 'Unten die fehlenden Angaben ergänzen: ' + E.fehlendeDaten(rec).join(', ')
-      : n.key === 'aufgeteilt' ? 'Unten bei „Förderung“ den Ticket-Zieher eintragen' : (n.hilfe || '');
+    const hinweis = n.key === 'daten' ? 'Unten die fehlenden Angaben ergänzen: ' + E.fehlendeDaten(rec).join(', ') : (n.hilfe || '');
     const laut = fr && ['unbekannt', 'ueberfaellig', 'dringend'].includes(fr.stufe);
     return `<div class="jetzt ${laut ? 'jetzt-dringend' : ''}"><div class="jetzt-text"><small>Als Nächstes · ${n.neben ? 'Nebenschritt' : `Schritt ${st.naechster + 1} von ${SCHRITTE.length}`}</small><b>${esc(n.todo)}</b>${n.warten ? '<span>Wartet auf die Förderstelle – abhaken, sobald es da ist.</span>' : ''}${hinweis ? `<span>${esc(hinweis)}</span>` : ''}${fr ? `<span class="jetzt-frist">${fristBadge(fr, true)}</span>` : ''}</div>
       ${!nurLesen && !n.auto ? `<button class="erledigt erledigt-gross" data-jetzt="${n.key}"><svg><use href="#i-check"/></svg>${esc(n.knopf)} – speichern</button>` : ''}</div>`;
@@ -1288,6 +1346,7 @@
         case 'dialog-zu': dialogZu(); break;
         case 'wuerfeln': wuerfelDialog(); break;
         case 'alle-neu-ansuchen': alleNeuAnsuchen(); break;
+        case 'zieher-excel': zieherExcel(); break;
         case 'mehr-filter': $('#mehr-filter').hidden = !$('#mehr-filter').hidden; break;
         case 'filter-zurueck':
           Object.assign(S.filter, { suche: '', call: '', art: '', mitarbeiter: '', zieher: '', schritt: '', papierkorb: false });
@@ -1324,6 +1383,14 @@
         S.sort = S.sort.k === s.dataset.sort ? { k: s.dataset.sort, auf: !S.sort.auf } : { k: s.dataset.sort, auf: true };
         speicherLokal.schreiben('sort', S.sort); zeichne(); return;
       }
+      const chip = e.target.closest('[data-zieher]');
+      if (chip) {
+        // Zieher-Chip zeigt nur die Tickets des Ticket-Tags, nicht alte Fälle mit demselben Namen
+        const an = S.filter.zieher !== chip.dataset.zieher;
+        S.filter.zieher = an ? chip.dataset.zieher : '';
+        S.filter.call = an ? E.naechsterTicketTag(heute()) || '' : '';
+        fuelleFilter(); zeichne(); return;
+      }
       const mehr = e.target.closest('[data-mehr]');
       if (mehr) { S.aufgeklappt.add(mehr.dataset.mehr); zeichne(); return; }
       const q = e.target.closest('[data-schnell]');
@@ -1331,6 +1398,11 @@
       if (q && tr) { e.stopPropagation(); schnellErledigt(tr.dataset.id, q.dataset.schnell); return; }
       if (e.target.closest('[data-neu-ansuchen]') && tr) { e.stopPropagation(); schnellNeuAnsuchen(tr.dataset.id); return; }
       if (tr) oeffne(S.daten.find(d => d.id === tr.dataset.id));
+    });
+    $('#liste').addEventListener('submit', e => {
+      if (e.target.id !== 'tt-form') return;
+      e.preventDefault();
+      ticketZieherSpeichern($('#tt-namen').value);
     });
     $('#liste').addEventListener('keydown', e => {
       const tr = e.target.closest('tr[data-id], .zeile[data-id], .z[data-id]');
