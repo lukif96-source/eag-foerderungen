@@ -100,10 +100,18 @@ test('Über 100 kWp: 12 Monate; Verlängerung ersetzt die Frist', () => {
   assert.equal(A.fristen(gross, '2027-01-01').find(x => x.art === 'endabrechnung').datum, '2029-02-20');
 });
 
-test('Vertrag ohne Datum: Frist unbekannt, steht ganz oben', () => {
+test('Vertrag ohne Datum: frühestmögliche Frist als Schätzung, nichts muss nachgetragen werden', () => {
   const fr = A.fristen(basis({ projekt: '✓', ticket: '✓', eingereicht: '✓', vertrag_erhalten: '✓' }), '2026-12-01');
-  assert.equal(fr[0].stufe, 'unbekannt');
-  assert.match(fr[0].hinweis, /Fördervertrags fehlt/);
+  assert.equal(fr[0].datum, '2027-04-22');              // Callende 22.10.2026 + 6 Monate
+  assert.equal(fr[0].geschaetzt, true);
+  assert.equal(fr[0].stufe, 'ruhig');
+});
+
+test('Alte Förderung ohne Vertragsdatum: Frist leise „unbekannt“, nicht rot', () => {
+  const f = basis({ projekt: '✓', ticket: '✓', eingereicht: '✓', vertrag_erhalten: '✓' }, { foerdercall: '2025-06-16' });
+  const fr = A.fristen(f, '2026-10-01');
+  assert.ok(fr.length > 0);
+  fr.forEach(x => { assert.equal(x.stufe, 'unbekannt'); assert.equal(x.datum, null); });
 });
 
 test('In Betrieb: nur noch die Endabrechnungs-Frist', () => {
@@ -163,12 +171,37 @@ test('Frist nur, solange kein späterer Schritt erledigt ist (alte Datensätze o
   assert.deepEqual(A.fristen(f, '2026-10-01'), []);   // wartet nur noch auf Auszahlung
 });
 
-test('Unbekannte Frist nennt das frühestmögliche Datum ab Callende', () => {
+test('Ohne Vertragsdatum: Schätzung ab Callende wird rechtzeitig dringend', () => {
   const f = basis({ projekt: '✓', ticket: '✓', eingereicht: '✓', vertrag_erhalten: '✓' }, { foerdercall: '2026-04-23' });
   const [ibn, abr] = A.fristen(f, '2026-10-01');
-  assert.equal(ibn.stufe, 'unbekannt');
-  assert.match(ibn.hinweis, /frühestens 11\.11\.2026/);
-  assert.match(abr.hinweis, /frühestens 11\.05\.2027/);
+  assert.equal(ibn.datum, '2026-11-11');
+  assert.equal(ibn.stufe, 'ruhig');
+  assert.match(ibn.hinweis, /frühestens/);
+  assert.equal(abr.datum, '2027-05-11');
+  assert.equal(A.fristen(f, '2026-11-05')[0].stufe, 'dringend');
+});
+
+// ── Alte und ausgezahlte Förderungen ──────────────────────────────
+test('Ausgezahlt ist fertig – auch mit Lücken, fehlenden Daten oder einem Ende-Haken', () => {
+  const nurAus = basis({ ausgezahlt: '2026-02-11' }, { zaehlpunkt: '', mail: '' });
+  const st = A.status(nurAus);
+  assert.equal(st.fertig, true);
+  assert.deepEqual(st.luecken, []);
+  assert.equal(st.ende, null);
+  assert.deepEqual(A.fristen(nurAus, '2026-10-01'), []);
+  assert.deepEqual(A.datenFehlen(nurAus, '2026-10-01'), []);
+  assert.equal(A.status(basis({ projekt: '✓', abgelehnt: '2026-07-10', ausgezahlt: '2026-12-01' })).fertig, true);
+});
+
+test('Fehlende Daten zählen nur bis zum Ticket und nur, solange der Call nicht vorbei ist', () => {
+  const neu = basis({}, { zaehlpunkt: '' });
+  assert.ok(A.datenFehlen(neu, '2026-10-01').length > 0);
+  assert.equal(A.SCHRITTE[A.status(neu, '2026-10-01').naechster].key, 'daten');
+  const mitTicket = basis({ projekt: '✓', ticket: '2026-10-08' }, { zaehlpunkt: '' });
+  assert.deepEqual(A.datenFehlen(mitTicket, '2026-10-09'), []);
+  const alt = basis({}, { zaehlpunkt: '', foerdercall: '2025-06-16' });
+  assert.deepEqual(A.datenFehlen(alt, '2026-10-01'), []);
+  assert.notEqual(A.SCHRITTE[A.status(alt, '2026-10-01').naechster].key, 'daten');
 });
 
 // ── Ticket-Zieher ─────────────────────────────────────────────────
@@ -212,10 +245,14 @@ test('Tracker beim Warten auf den Vertrag: Förderstelle ist dran, ruhig', () =>
   assert.equal(t.ton, 'ruhig');
 });
 
-test('Tracker: Vertrag ohne Datum → Frist unbekannt = Alarm', () => {
-  const t = A.tracker(basis({ projekt: '✓', ticket: '✓', eingereicht: '✓', vertrag_erhalten: '✓' }), '2026-12-01');
-  assert.equal(t.frist.stufe, 'unbekannt');
-  assert.equal(t.ton, 'alarm');
+test('Tracker: Vertrag ohne Datum → Schätzung oder leise „unbekannt“, nie Alarm', () => {
+  const f = basis({ projekt: '✓', ticket: '✓', eingereicht: '✓', vertrag_erhalten: '✓' });
+  const t = A.tracker(f, '2026-12-01');                     // frühestens 22.04.2027 – Schätzung
+  assert.equal(t.frist.geschaetzt, true);
+  assert.equal(t.ton, 'ruhig');
+  const spaet = A.tracker(f, '2028-01-01');                  // Schätzung vorbei → unbekannt, leise
+  assert.equal(spaet.frist.stufe, 'unbekannt');
+  assert.equal(spaet.ton, 'ruhig');
 });
 
 test('Tracker: Lücke färbt die Phase und macht aufmerksam', () => {

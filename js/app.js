@@ -249,7 +249,7 @@
         case 'zieher': return (x.d.zieher || '').toLowerCase();
         case 'kwp': return x.d.kwp || 0;
         case 'status': return x.st.fertig ? 99 : x.st.ende ? 98 : x.st.naechster;
-        case 'frist': { const fr = E.fristen(x.d, heute())[0]; return fr ? (fr.datum || '0000') : '9999'; }
+        case 'frist': { const fr = E.fristen(x.d, heute())[0]; return fr && fr.datum ? fr.datum : '9999'; }
         case 'geaendert': return x.d.geaendert_am || '';
         default: return (x.d.foerdercall || '9999') + (x.d.kunde || '').toLowerCase();
       }
@@ -271,8 +271,10 @@
   }
 
   const hatOffenePunkte = x => !!(x.d.offene_punkte || '').trim();
-  const fehltDaten = x => E.fehlendeDaten(x.d).length > 0 && x.st.hoechster < E.IDX.ticket && !x.st.ende;
-  const fristBald = x => { const fr = E.fristen(x.d, heute())[0]; return !!fr && fr.stufe !== 'ruhig'; };
+  const fehltDaten = x => E.datenFehlen(x.d, heute()).length > 0;
+  // Nur echte Fristen drängeln; „unbekannt“ (alte Förderung ohne Vertragsdatum) bleibt leise
+  const fristLaut = fr => !!fr && ['ueberfaellig', 'dringend', 'bald'].includes(fr.stufe);
+  const fristBald = x => fristLaut(E.fristen(x.d, heute())[0]);
   function passtExtra(x) {
     if (S.extra === 'frist') return fristBald(x);
     if (S.extra === 'offen') return hatOffenePunkte(x);
@@ -315,7 +317,7 @@
     basis.forEach(x => { n[kategorie(x.st, x.d)]++; });
     const offen = basis.filter(x => !x.st.ende && !x.st.fertig);
     const alarm = { frist: offen.filter(fristBald).length, offen: offen.filter(hatOffenePunkte).length, datenfehlen: offen.filter(fehltDaten).length };
-    const kritisch = offen.some(x => { const fr = E.fristen(x.d, heute())[0]; return fr && ['unbekannt', 'ueberfaellig'].includes(fr.stufe); });
+    const kritisch = offen.some(x => { const fr = E.fristen(x.d, heute())[0]; return fr && fr.stufe === 'ueberfaellig'; });
     const seg = (k, t) => `<button class="seg-knopf ${S.ansicht === k ? 'aktiv' : ''}" data-ansicht="${k}">${t}<span>${n[k]}</span></button>`;
     const chip = (k, icon, t, laut) => alarm[k] ? `<button class="alarm alarm-${k} ${laut ? 'laut' : ''} ${S.extra === k ? 'aktiv' : ''}" data-extra="${k}" title="${esc(t)}"><svg><use href="#${icon}"/></svg><b>${alarm[k]}</b><span>${t}</span></button>` : '';
     $('#reiter').innerHTML = `<div class="seg">${seg('todo', 'Zu tun')}${seg('warten', 'Wartet')}${seg('fertig', 'Fertig')}${seg('beendet', 'Beendet')}${seg('alle', 'Alle')}</div>
@@ -335,7 +337,7 @@
   // Frist als kleines Etikett; lang = mit Resttagen
   function fristBadge(fr, lang) {
     if (!fr) return '';
-    const wann = fr.datum ? datumDE(fr.datum) : 'unbekannt';
+    const wann = fr.datum ? datumDE(fr.datum) + (fr.geschaetzt ? ' (frühestens)' : '') : 'unbekannt';
     const rest = fr.tage === null ? '' : fr.tage < 0 ? ` · ${-fr.tage} Tage überfällig` : fr.tage === 0 ? ' · heute' : ` · noch ${fr.tage} Tage`;
     return `<span class="frist frist-${fr.stufe}" title="${esc(fr.hinweis)}"><svg><use href="#i-history"/></svg>${esc(fr.label)}: ${esc(wann)}${lang ? esc(rest) : ''}</span>`;
   }
@@ -343,7 +345,7 @@
 
   function zeileHtml(d, st, bearbeiten, ohneFrist) {
     const n = E.aufgabe(d, st);
-    const fehlt = E.fehlendeDaten(d);
+    const fehlt = E.datenFehlen(d, heute());
     const fr = E.fristen(d, heute())[0];
     const s = d.schritte || {};
     const meta = [[d.plz, d.ort].filter(Boolean).join(' '), d.foerdercall ? 'Call ' + datumDE(d.foerdercall).slice(0, 6) + d.foerdercall.slice(2, 4) : '',
@@ -364,13 +366,13 @@
     const flags = [
       s.frueher_abgelehnt ? `<span class="z-tag" title="Abgelehnt im Call ${esc(callsText(s.frueher_abgelehnt))}">2. Versuch</span>` : '',
       (d.offene_punkte || '').trim() ? `<span class="z-icon gelb" title="${esc(d.offene_punkte)}"><svg><use href="#i-flag"/></svg></span>` : '',
-      fehlt.length && st.hoechster < E.IDX.ticket && !st.ende ? `<span class="z-icon rot" title="Es fehlen: ${esc(fehlt.join(', '))}"><svg><use href="#i-alert"/></svg></span>` : ''
+      fehlt.length ? `<span class="z-icon rot" title="Es fehlen: ${esc(fehlt.join(', '))}"><svg><use href="#i-alert"/></svg></span>` : ''
     ].join('');
     const phase = st.fertig ? 'fertig' : st.ende ? 'ende' : n.phase;
     return `<div class="z" data-id="${d.id}" tabindex="0">
       <span class="z-punkt p-${phase}" aria-hidden="true"></span>
       <div class="z-haupt"><div class="z-name">${esc(d.kunde || '(ohne Namen)')}${flags}</div><div class="z-meta">${esc(meta.join(' · '))}</div></div>
-      <div class="z-frist">${ohneFrist ? '' : fr && fr.stufe !== 'ruhig' ? fristBadge(fr, true) : fr ? `<span class="z-datum">${esc(fr.label)} bis ${datumDE(fr.datum)}</span>` : ''}</div>
+      <div class="z-frist">${ohneFrist ? '' : fristLaut(fr) ? fristBadge(fr, true) : fr && fr.datum ? `<span class="z-datum">${esc(fr.label)} bis ${datumDE(fr.datum)}${fr.geschaetzt ? ' (frühestens)' : ''}</span>` : ''}</div>
       <div class="z-aktion">${knopf}</div>
     </div>`;
   }
@@ -391,7 +393,7 @@
     const defs = S.ansicht === 'fertig' ? [{ key: 'fertig', todo: 'Ausgezahlt', phase: 'fertig' }]
       : S.ansicht === 'beendet' ? E.ENDE.map(e => ({ key: e.key, todo: e.label, phase: 'ende' }))
       : GRUPPEN;
-    const RANG = { unbekannt: 0, ueberfaellig: 1, dringend: 2, bald: 3, ruhig: 4 };
+    const RANG = { ueberfaellig: 0, dringend: 1, bald: 2, ruhig: 3, unbekannt: 4 };
     const dringlich = x => { const fr = E.fristen(x.d, heute())[0]; return fr ? RANG[fr.stufe] + (fr.datum || '') : '9'; };
     const zeigen = (S.filter.suche || S.extra) ? 999 : 8;
     const call = E.offenerCall(heute());
@@ -404,7 +406,7 @@
       // Gleiche Frist für die ganze Gruppe (z. B. Ticket am Calltag): einmal oben statt in jeder Zeile
       const fristen = eintraege.map(x => E.fristen(x.d, heute())[0] || null);
       const f0 = fristen[0];
-      const gemeinsam = eintraege.length > 1 && f0 && fristen.every(f => f && f.art === f0.art && f.datum === f0.datum);
+      const gemeinsam = eintraege.length > 1 && f0 && f0.datum && fristen.every(f => f && f.art === f0.art && f.datum === f0.datum);
       return `<section class="g" id="gruppe-${g.key}">
         <header class="g-kopf"><span class="z-punkt p-${g.phase}" aria-hidden="true"></span><h2>${esc(g.todo)}</h2><span class="g-n">${eintraege.length}</span>${gemeinsam ? `<span class="g-frist">${fristBadge(f0, true)}</span>` : ''}${hilfe ? `<span class="g-hilfe">${esc(hilfe)}</span>` : ''}${extra}</header>
         <div class="g-karte">${(offen ? eintraege : eintraege.slice(0, zeigen)).map(x => zeileHtml(x.d, x.st, bearbeiten, gemeinsam)).join('')}
@@ -502,20 +504,20 @@
       <tbody>${liste.map(({ d, st }) => {
         const n = E.aufgabe(d, st);
         const fr = E.fristen(d, heute())[0];
-        const fehlt = E.fehlendeDaten(d);
+        const fehlt = E.datenFehlen(d, heute());
         const anlage = [d.kwp ? zahlDE(d.kwp) + ' kWp' : '', d.speicher ? d.speicher : ''].filter(Boolean).join(' · ');
         return `<tr data-id="${d.id}" tabindex="0">
           <td class="sp-kunde"><div class="kunde">${esc(d.kunde || '(ohne Namen)')}</div>
             <div class="klein grau">${esc([d.plz, d.ort].filter(Boolean).join(' '))}${d.projekt_nr ? ' · ' + esc(d.projekt_nr) : ''}${d.art ? ' · ' + esc(d.art) : ''}</div>
             ${(d.offene_punkte || '').trim() ? `<div class="hinweis-zeile"><svg><use href="#i-flag"/></svg>${esc(d.offene_punkte)}</div>` : ''}
-            ${fehlt.length && st.hoechster < E.IDX.ticket && !st.ende ? `<div class="hinweis-zeile warn"><svg><use href="#i-alert"/></svg>fehlt: ${esc(fehlt.join(', '))}</div>` : ''}</td>
+            ${fehlt.length ? `<div class="hinweis-zeile warn"><svg><use href="#i-alert"/></svg>fehlt: ${esc(fehlt.join(', '))}</div>` : ''}</td>
           <td data-l="Call">${d.foerdercall ? datumDE(d.foerdercall) : '<span class="grau">–</span>'}</td>
           <td data-l="Mitarbeiter" class="sp-m">${esc(d.mitarbeiter) || '<span class="grau">–</span>'}</td>
           <td data-l="Zieher" class="sp-m">${esc(d.zieher) || '<span class="grau">–</span>'}</td>
           <td data-l="Anlage" class="sp-r">${esc(anlage) || '<span class="grau">–</span>'}</td>
           <td data-l="Ticket / FPJ" class="sp-l mono klein">${esc(d.ticket) || '<span class="grau">–</span>'}${d.fpj ? '<br>' + esc(d.fpj) : ''}</td>
           <td class="sp-stand">${fortschritt(d, st)}
-            <div class="stand-text">${st.fertig ? '<span class="gruen">Ausgezahlt</span>' : st.ende ? `<span class="rot">${esc(st.ende.label)}</span>` : `<span class="grau">Als Nächstes:</span> ${esc(n.todo)}`}</div>${fr && fr.stufe !== 'ruhig' ? fristBadge(fr, false) : ''}</td>
+            <div class="stand-text">${st.fertig ? '<span class="gruen">Ausgezahlt</span>' : st.ende ? `<span class="rot">${esc(st.ende.label)}</span>` : `<span class="grau">Als Nächstes:</span> ${esc(n.todo)}`}</div>${fristLaut(fr) ? fristBadge(fr, false) : ''}</td>
           <td class="sp-aktion">${bearbeiten && st.ende && st.ende.key === 'abgelehnt' && E.offenerCall(heute()) ? '<button class="btn btn-mini" data-neu-ansuchen><svg><use href="#i-restore"/></svg><span>Neu ansuchen</span></button>' : ''}${bearbeiten && n && !n.auto ? `<button class="btn btn-mini" data-schnell="${n.key}" title="${esc(n.label)} – heute erledigt"><svg><use href="#i-check"/></svg><span>${esc(n.kurz)}</span></button>` : ''}</td>
         </tr>`;
       }).join('')}</tbody></table>`;
@@ -637,7 +639,10 @@
       ? `<span class="ablauf-auto">${x.key === 'ticket' && rec.zieher ? 'Zieht: ' + esc(rec.zieher) + '. ' : ''}${esc(x.hilfe || '')}</span>` : '';
     if (x.auto) {
       let txt;
-      if (x.key === 'daten') { const fehlt = E.fehlendeDaten(rec); txt = fehlt.length ? 'fehlt: ' + fehlt.join(', ') : 'vollständig'; }
+      if (x.key === 'daten') {
+        const fehlt = E.fehlendeDaten(rec), noetig = E.datenFehlen(rec, heute());
+        txt = noetig.length ? 'fehlt: ' + noetig.join(', ') : fehlt.length ? 'nicht mehr nötig' : 'vollständig';
+      }
       else txt = rec.zieher ? 'an ' + rec.zieher : 'Ticket-Zieher unten bei „Förderung“ eintragen';
       return `<li class="${cls}"><span class="punkt">${st.erledigt[i] ? '<svg><use href="#i-check"/></svg>' : i + 1}</span>
         <span class="ablauf-titel">${esc(x.label)}</span><span class="ablauf-auto">${esc(txt)}</span></li>`;
@@ -647,7 +652,7 @@
         <span>${st.erledigt[i] ? '<svg><use href="#i-check"/></svg>' : i + 1}</span></label>
       <span class="ablauf-titel">${esc(x.label)}${st.luecken.includes(i) ? ' <span class="luecke-text">übersprungen?</span>' : ''}</span>
       <input type="date" class="ablauf-datum" data-schritt-datum="${x.key}" value="${esc(datum)}" ${nurLesen ? 'disabled' : ''} title="Datum">
-      ${w === '✓' ? `<span class="ablauf-auto">${x.key === 'vertrag_erhalten' ? '<b class="rot">Datum fehlt – ohne Datum keine Fristen</b>' : 'erledigt, Datum unbekannt'}</span>` : hilfe}</li>`;
+      ${w === '✓' ? `<span class="ablauf-auto">${x.key === 'vertrag_erhalten' ? 'erledigt, Datum unbekannt – optional, macht die Fristen genau' : 'erledigt, Datum unbekannt'}</span>` : hilfe}</li>`;
   }
 
   // Ablauf nach Phasen, mit Nebenschritten an der Stelle, an der sie passieren
@@ -713,7 +718,7 @@
     }
     const n = E.aufgabe(rec, st);
     const fr = t.frist;
-    const hinweis = n.key === 'daten' ? 'Unten die fehlenden Angaben ergänzen: ' + E.fehlendeDaten(rec).join(', ') : (n.hilfe || '');
+    const hinweis = n.key === 'daten' ? 'Unten die fehlenden Angaben ergänzen: ' + E.datenFehlen(rec, heute()).join(', ') : (n.hilfe || '');
     const wer = t.aktion.wer === 'foerderstelle' ? 'Förderstelle ist dran' : 'Wir sind dran';
     return `<div class="jetzt ${t.ton === 'alarm' ? 'jetzt-dringend' : ''}">${leiste}<div class="jetzt-text"><small>Als Nächstes · ${n.neben ? 'Nebenschritt' : `Schritt ${t.nummer} von ${t.gesamt}`} · ${wer}</small><b>${esc(n.todo)}</b>${n.warten ? '<span>Wartet auf die Förderstelle – abhaken, sobald es da ist.</span>' : ''}${hinweis ? `<span>${esc(hinweis)}</span>` : ''}${fr ? `<span class="jetzt-frist">${fristBadge(fr, true)}</span>` : ''}</div>
       ${!nurLesen && !n.auto ? `<button class="erledigt erledigt-gross" data-jetzt="${n.key}"><svg><use href="#i-check"/></svg>${esc(n.knopf)} – speichern</button>` : ''}</div>`;
@@ -1012,7 +1017,7 @@
       const fr = E.fristen(d, heute())[0];
       z['Ergebnis'] = st.ende ? st.ende.label + (E.istDatum(ew) ? ' ' + datumDE(ew) : '') : '';
       z['Nächster Schritt'] = st.fertig ? 'fertig' : st.ende ? '' : E.aufgabe(d, st).todo;
-      z['Nächste Frist'] = fr ? `${fr.label}: ${fr.datum ? datumDE(fr.datum) : 'unbekannt'}` : '';
+      z['Nächste Frist'] = fr ? `${fr.label}: ${fr.datum ? datumDE(fr.datum) + (fr.geschaetzt ? ' (frühestens)' : '') : 'unbekannt'}` : '';
       z['Offene Punkte'] = d.offene_punkte; z['Info'] = d.info;
       return z;
     });
