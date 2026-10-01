@@ -534,9 +534,9 @@ body.demo .kopf::after { content: "DEMO – keine echten Daten"; position: absol
 /* ---------- Fristen ---------- */
 .frist { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 2px 9px 2px 7px; border-radius: 999px; white-space: nowrap; }
 .frist svg { width: 13px; height: 13px; flex: none; }
-.frist-ruhig { background: var(--linie-2); color: var(--text-2); }
+.frist-ruhig, .frist-unbekannt { background: var(--linie-2); color: var(--text-2); }
 .frist-bald { background: var(--amber-hell); color: #8a5d00; }
-.frist-dringend, .frist-unbekannt { background: var(--rot-hell); color: var(--rot); }
+.frist-dringend { background: var(--rot-hell); color: var(--rot); }
 .frist-ueberfaellig { background: var(--rot); color: #fff; }
 .hinweis-frist { margin-top: 5px; }
 .stand-text + .frist { margin-top: 4px; }
@@ -551,9 +551,10 @@ body.demo .kopf::after { content: "DEMO – keine echten Daten"; position: absol
 .frist-zeile span { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .frist-zeile small { grid-column: 1 / -1; font-size: 12px; color: var(--text-2); }
 .fz-bald { border-left-color: var(--amber); }
-.fz-dringend, .fz-unbekannt { border-left-color: var(--rot); background: #fffafa; }
+.fz-dringend { border-left-color: var(--rot); background: #fffafa; }
 .fz-ueberfaellig { border-left-color: var(--rot); background: var(--rot-hell); }
-.fz-ueberfaellig span, .fz-dringend span, .fz-unbekannt span { color: var(--rot); }
+.fz-ueberfaellig span, .fz-dringend span { color: var(--rot); }
+.fz-unbekannt span { color: var(--text-2); font-weight: 600; }
 
 /* ---------- Ablauf: Phasen, Nebenschritte, Ende ---------- */
 .ablauf li.phase { display: block; padding: 12px 6px 2px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }

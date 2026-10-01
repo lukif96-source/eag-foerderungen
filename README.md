@@ -35,7 +35,10 @@ Laut SOLPRO ist der Call vom 8.–22.10.2026 der letzte; 2027 gibt es keinen.
 
 Die Regeln stehen an **einer** Stelle: `js/ablauf.js` (ohne Seite, ohne Datenbank), getestet mit
 `node --test` (läuft auch bei jedem Push auf GitHub). Fristen werden berechnet, nie gespeichert.
-Ohne Vertragsdatum ist eine Frist „unbekannt“ und steht rot ganz oben – mit dem frühestmöglichen Datum.
+Nachtragen ist nie Pflicht: Ohne Vertragsdatum gilt die frühestmögliche Frist (ab Callende) als Schätzung,
+solange sie noch vor uns liegt; bei alten Förderungen bleibt die Frist leise „unbekannt“.
+**Ausgezahlt = fertig**, egal was davor fehlt. Fehlende Kundendaten zählen nur bis zum Ticket und nur,
+solange der Call nicht vorbei ist.
 
 **Ticket-Tag** (8.10.2026, ab 17:00): Bis einschließlich dem Calltag steht oben unter „Zu tun“ eine Karte.
 Namen der Ticket-Zieher eintragen (mit Komma) und Enter → wer noch keinen Zieher hat, wird zufällig und

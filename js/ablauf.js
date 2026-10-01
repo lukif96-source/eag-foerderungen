@@ -110,18 +110,33 @@
     return fehlt;
   }
 
-  function schrittWert(f, key) {
-    if (key === 'daten') return fehlendeDaten(f).length === 0 ? '✓' : '';
+  // Fehlende Kundendaten zählen nur, solange sie noch gebraucht werden: bis zum Ticket und nur,
+  // solange der Call nicht vorbei ist. Bei alten oder ausgezahlten Förderungen wird nichts nachgetragen.
+  function datenFehlen(f, heute) {
+    const s = f.schritte || {};
+    if (ENDE.some(e => !leer(s[e.key]))) return [];
+    if (SCHRITTE.some((x, i) => i >= IDX.ticket && !leer(s[x.key]))) return [];
+    const ende = callEnde(f.foerdercall);
+    if (ende && ende < (heute || heuteText())) return [];
+    return fehlendeDaten(f);
+  }
+
+  function schrittWert(f, key, heute) {
+    if (key === 'daten') return datenFehlen(f, heute).length === 0 ? '✓' : '';
     const v = (f.schritte || {})[key];
     return leer(v) ? '' : v;
   }
 
   // Wo steht die Förderung? höchster erledigter Schritt, nächster offener danach,
   // Lücken davor, und ob sie ohne Auszahlung beendet ist.
-  function status(f) {
+  function status(f, heute) {
     const s = f.schritte || {};
+    // Ausgezahlt ist ausgezahlt: fertig, egal was davor fehlt oder sonst angehakt ist
+    if (!leer(s.ausgezahlt)) {
+      return { erledigt: SCHRITTE.map(() => true), hoechster: SCHRITTE.length - 1, naechster: -1, luecken: [], ende: null, nachforderungOffen: false, fertig: true };
+    }
     const ende = ENDE.find(e => !leer(s[e.key])) || null;
-    const erledigt = SCHRITTE.map(x => !!schrittWert(f, x.key));
+    const erledigt = SCHRITTE.map(x => !!schrittWert(f, x.key, heute));
     const hoechster = erledigt.lastIndexOf(true);
     let naechster = -1;
     if (!ende) for (let i = hoechster + 1; i < SCHRITTE.length; i++) if (!erledigt[i]) { naechster = i; break; }
@@ -151,7 +166,8 @@
     if (tage <= 30) return 'bald';
     return 'ruhig';
   }
-  const RANG = { unbekannt: 0, ueberfaellig: 1, dringend: 2, bald: 3, ruhig: 4 };
+  // „unbekannt“ ist leise: fehlende Daten alter Förderungen sollen nicht drängeln
+  const RANG = { ueberfaellig: 0, dringend: 1, bald: 2, ruhig: 3, unbekannt: 4 };
 
   // Inbetriebnahme-Frist: 6 Monate ab Fördervertrag, über 100 kWp 12 Monate; Verlängerung ersetzt sie
   function inbetriebnahmeFrist(f) {
@@ -165,13 +181,13 @@
   function fristen(f, heute) {
     heute = heute || heuteText();
     const s = f.schritte || {};
-    const st = status(f);
+    const st = status(f, heute);
     if (st.ende || st.fertig) return [];
     const offen = k => leer(s[k]);
     const aus = [];
-    const dazu = (art, label, datum, hinweis) => {
+    const dazu = (art, label, datum, hinweis, geschaetzt) => {
       const tage = datum ? tagNr(datum) - tagNr(heute) : null;
-      aus.push({ art, label, datum, tage, stufe: stufe(tage), hinweis: hinweis || '' });
+      aus.push({ art, label, datum, tage, stufe: stufe(tage), hinweis: hinweis || '', geschaetzt: !!geschaetzt });
     };
     const call = f.foerdercall;
     // Eine Frist gilt nur, solange kein späterer Schritt erledigt ist
@@ -185,13 +201,22 @@
     }
     if (!offen('vertrag_erhalten')) {
       const ibn = inbetriebnahmeFrist(f);
-      // Ohne Vertragsdatum: frühestmögliche Frist ab Callende, damit klar ist, wie knapp es sein kann
+      // Ohne Vertragsdatum muss niemand nachtragen: Liegt die frühestmögliche Frist (ab Callende) noch vor uns,
+      // gilt sie als Schätzung – sicher, weil die echte Frist nur später sein kann. Ist sie vorbei, bleibt
+      // die Frist leise „unbekannt“.
       const monate = Number(f.kwp) > 100 ? 12 : 6;
-      const frueh = istDatum(call) ? plusMonate(callEnde(call), monate) : null;
-      const ohneDatum = 'Datum des Fördervertrags fehlt – Frist unbekannt' + (frueh ? `, frühestens ${frueh.slice(8, 10)}.${frueh.slice(5, 7)}.${frueh.slice(0, 4)}` : '');
-      const ohneDatumAbr = 'Datum des Fördervertrags fehlt – Frist unbekannt' + (frueh ? `, frühestens ${plusMonate(frueh, 6).slice(8, 10)}.${plusMonate(frueh, 6).slice(5, 7)}.${plusMonate(frueh, 6).slice(0, 4)}` : '');
-      if (offen('inbetriebnahme') && vor('inbetriebnahme')) dazu('inbetriebnahme', 'In Betrieb nehmen', ibn, ibn ? (istDatum(s.verlaengert_bis) ? 'verlängert' : '') : ohneDatum);
-      if (vor('abgeschlossen')) dazu('endabrechnung', 'Endabrechnung einreichen', ibn ? plusMonate(ibn, 6) : null, ibn ? '6 Monate nach der Inbetriebnahme-Frist' : ohneDatumAbr);
+      const fruehIbn = istDatum(call) ? plusMonate(callEnde(call), monate) : null;
+      const schaetzung = frueh => frueh && frueh >= heute
+        ? [frueh, 'frühestens – Vertragsdatum unbekannt', true]
+        : [null, 'Vertragsdatum unbekannt – Frist nicht berechenbar (Eintrag optional)', false];
+      if (offen('inbetriebnahme') && vor('inbetriebnahme')) {
+        if (ibn) dazu('inbetriebnahme', 'In Betrieb nehmen', ibn, istDatum(s.verlaengert_bis) ? 'verlängert' : '');
+        else dazu('inbetriebnahme', 'In Betrieb nehmen', ...schaetzung(fruehIbn));
+      }
+      if (vor('abgeschlossen')) {
+        if (ibn) dazu('endabrechnung', 'Endabrechnung einreichen', plusMonate(ibn, 6), '6 Monate nach der Inbetriebnahme-Frist');
+        else dazu('endabrechnung', 'Endabrechnung einreichen', ...schaetzung(fruehIbn && plusMonate(fruehIbn, 6)));
+      }
     }
     return aus.sort((a, b) => (RANG[a.stufe] - RANG[b.stufe]) || String(a.datum).localeCompare(String(b.datum)));
   }
@@ -295,7 +320,7 @@
 
   const API = {
     PHASEN, SCHRITTE, IDX, ENDE, NEBEN, CALLS, LETZTER_CALL, PFLICHT, FELDER, SAETZE_2026,
-    leer, istDatum, plusTage, plusMonate, heuteText, callEnde, fehlendeDaten, schrittWert, status, aufgabe,
+    leer, istDatum, plusTage, plusMonate, heuteText, callEnde, fehlendeDaten, datenFehlen, schrittWert, status, aufgabe,
     inbetriebnahmeFrist, fristen, offenerCall, naechsterTicketTag, zieherVerteilen, neuAnsuchen, zpPruefung, kategorie, zuschuss,
     nameTokens, zpNorm, gleicherKunde
   };
