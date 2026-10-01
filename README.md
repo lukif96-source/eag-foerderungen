@@ -58,6 +58,14 @@ in der Akte. Am 9.10. heißt die Karte „heute eintragen, wer gezogen hat“; a
 Excel-Import: orange-rot markierte Zeilen (abgelehnt) kommen direkt in den offenen Call;
 schon importierte Einträge werden beim erneuten Import einmalig umgestellt.
 
+## Bedienung
+Design wie im Messtool (`pro.css`): neutrale Grautöne, Farbe nur für Bedeutung (Grün erledigt, Bernstein bald,
+Rot dringend), Hell/Dunkel automatisch oder im Menü umschaltbar.
+Tastatur: **⌘K / Strg+K** Suchen und Befehle (Kunde finden, nächsten Schritt erledigen, Ansicht wechseln) ·
+**/** Liste filtern · **J / K** nächste/vorige Förderung (auch in der offenen Akte) · **E** nächsten Schritt heute
+erledigen · **N** neuer Kunde · **⌘S** speichern · **⌘Z** letztes Erledigen rückgängig · **?** Übersicht.
+Jedes Schnell-Erledigen zeigt 8 Sekunden „Rückgängig“.
+
 ## Tägliche Sicherung
 Jede Nacht (02:15) wird die ganze Förderliste gesichert: unveränderbar in der Datenbank (`foerder_archiv`, mit
 SHA-256, verkettet mit dem Vortag), als Datei im privaten Storage und per Mail an die Admins (CSV für Excel + JSON).

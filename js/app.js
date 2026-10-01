@@ -75,10 +75,35 @@
   // Kleinigkeiten: Toast, Rückfrage
   // ---------------------------------------------------------------
   let toastTimer;
-  function toast(msg, art) {
+  // Toast; mit rueckgaengig (Funktion) gibt es 8 Sekunden lang „Rückgängig“ (auch ⌘Z / Strg+Z)
+  let rueckgaengigFn = null;
+  function toast(msg, art, rueckgaengig) {
     const t = $('#toast');
-    t.textContent = msg; t.className = 'toast' + (art ? ' toast-' + art : ''); t.hidden = false;
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, art === 'fehler' ? 6000 : 3000);
+    t.className = 'toast' + (art ? ' toast-' + art : '');
+    t.innerHTML = `<span>${esc(msg)}</span>${rueckgaengig ? '<button type="button" data-rueckgaengig>Rückgängig <kbd>⌘Z</kbd></button>' : ''}`;
+    t.hidden = false;
+    rueckgaengigFn = rueckgaengig || null;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; rueckgaengigFn = null; }, rueckgaengig ? 8000 : art === 'fehler' ? 6000 : 3000);
+  }
+  async function rueckgaengigMachen() {
+    const fn = rueckgaengigFn;
+    if (!fn) return;
+    rueckgaengigFn = null; $('#toast').hidden = true;
+    try { await fn(); toast('Rückgängig gemacht.'); } catch (e) { toast(E.fehlerText(e), 'fehler'); laden(); }
+  }
+  // Ändern mit Rückgängig: merkt sich die alten Werte genau der geänderten Felder
+  async function aendernMitRueckgaengig(d, patch, meldung) {
+    const vorher = {};
+    Object.keys(patch).forEach(k => { vorher[k] = d[k] === undefined ? null : JSON.parse(JSON.stringify(d[k])); });
+    try {
+      Object.assign(d, await Q.aendern(d.id, patch, d.geaendert_am));
+      toast(meldung(d), 'ok', async () => { Object.assign(d, await Q.aendern(d.id, vorher, d.geaendert_am)); fuelleFilter(); zeichne(); });
+      fuelleFilter(); zeichne();
+    } catch (e) {
+      if (e.konflikt) { toast('Der Eintrag wurde gerade von jemand anderem geändert – Liste neu geladen.', 'fehler'); laden(); }
+      else toast(E.fehlerText(e), 'fehler');
+    }
   }
 
   function frage(text, jaText, gefahr) {
@@ -496,15 +521,7 @@
   }
   async function ticketSpeichern(id, patchFn, meldung) {
     const d = S.daten.find(x => x.id === id);
-    if (!d) return;
-    try {
-      Object.assign(d, await Q.aendern(id, patchFn(d), d.geaendert_am));
-      toast(meldung(d), 'ok');
-      fuelleFilter(); zeichne();
-    } catch (e) {
-      if (e.konflikt) { toast('Der Eintrag wurde gerade von jemand anderem geändert – Liste neu geladen.', 'fehler'); laden(); }
-      else toast(E.fehlerText(e), 'fehler');
-    }
+    if (d) await aendernMitRueckgaengig(d, patchFn(d), meldung);
   }
   const ticketUhrzeit = d => d.foerdercall === heute() ? uhrJetzt() : '';
   function ticketGezogenSpeichern(id, von) {
@@ -599,15 +616,7 @@
     const d = S.daten.find(x => x.id === id);
     if (!d) return;
     if (key === 'ticket') return ticketGezogenSpeichern(id, d.zieher);
-    try {
-      const neu = await Q.aendern(id, { schritte: Object.assign({}, d.schritte || {}, { [key]: heute() }) }, d.geaendert_am);
-      Object.assign(d, neu);
-      toast(`${d.kunde}: ${ALLE_LABEL[key] || key} ✓`, 'ok');
-      zeichne();
-    } catch (e) {
-      if (e.konflikt) { toast('Der Eintrag wurde gerade von jemand anderem geändert – Liste neu geladen.', 'fehler'); laden(); }
-      else toast(E.fehlerText(e), 'fehler');
-    }
+    await aendernMitRueckgaengig(d, { schritte: Object.assign({}, d.schritte || {}, { [key]: heute() }) }, x => `${x.kunde}: ${ALLE_LABEL[key] || key}`);
   }
 
   // Abgelehnt → im offenen Call neu ansuchen (Ticket weg, Projekt bleibt, Herkunft gemerkt)
@@ -1493,6 +1502,9 @@ Vortag: ${esc(a.vorher_sha256 || '–')}">${esc(kurzHash(a.sha256))}</td>
         case 'import': importDialog(); break;
         case 'nutzer': nutzerDialog(); break;
         case 'sicherungen': sicherungenDialog(); break;
+        case 'befehle': befehlspalette(); break;
+        case 'darstellung': darstellungWeiter(); break;
+        case 'tasten': tastenDialog(); break;
         case 'passwort': $('#nutzer-menue').hidden = true; passwortDialog(false); break;
         case 'abmelden': $('#nutzer-menue').hidden = true; await Q.abmelden(); S.ich = null; S.daten = []; zeige('login'); setzeLoginModus('anmelden'); break;
         case 'neu-laden': await laden(); toast('Aktualisiert.', 'ok'); break;
@@ -1634,6 +1646,8 @@ Vortag: ${esc(a.vorher_sha256 || '–')}">${esc(kurzHash(a.sha256))}</td>
       else nutzerAktion(e);
     });
 
+    document.addEventListener('keydown', tastatur);
+    $('#toast').addEventListener('click', e => { if (e.target.closest('[data-rueckgaengig]')) rueckgaengigMachen(); });
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
         if (!$('#dialog').hidden) dialogZu();
@@ -1650,9 +1664,162 @@ Vortag: ${esc(a.vorher_sha256 || '–')}">${esc(kurzHash(a.sha256))}</td>
   }
 
   // ---------------------------------------------------------------
+  // Darstellung: automatisch (System) · hell · dunkel
+  // ---------------------------------------------------------------
+  const DARSTELLUNG = { auto: 'automatisch', hell: 'hell', dunkel: 'dunkel' };
+  function darstellungSetzen(modus) {
+    modus = DARSTELLUNG[modus] ? modus : 'auto';
+    speicherLokal.schreiben('theme', modus);
+    if (modus === 'auto') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = modus === 'hell' ? 'light' : 'dark';
+    const t = $('#darstellung-text');
+    if (t) t.textContent = 'Darstellung: ' + DARSTELLUNG[modus];
+  }
+  const darstellungWeiter = () => darstellungSetzen({ auto: 'hell', hell: 'dunkel', dunkel: 'auto' }[speicherLokal.lesen('theme', 'auto')] || 'auto');
+
+  // ---------------------------------------------------------------
+  // Befehlspalette (⌘K / Strg+K): Förderung finden, nächsten Schritt erledigen, Befehle
+  // ---------------------------------------------------------------
+  const BP = { el: null, idx: 0, eintraege: [] };
+  const norm = t => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  function bpBefehle() {
+    const ansicht = (k, t) => ({ gruppe: 'Befehle', icon: 'i-filter', titel: 'Ansicht: ' + t, tun: () => { S.ansicht = k; S.aufgeklappt.clear(); zeichne(); } });
+    return [
+      darf('bearbeiten') && { gruppe: 'Befehle', icon: 'i-plus', titel: 'Neuer Kunde', taste: 'N', tun: () => oeffne(null) },
+      ansicht('todo', 'Zu tun'), ansicht('warten', 'Wartet'), ansicht('fertig', 'Fertig'), ansicht('beendet', 'Beendet'), ansicht('alle', 'Alle (Tabelle)'),
+      { gruppe: 'Befehle', icon: 'i-download', titel: 'Als Excel herunterladen', tun: exportieren },
+      darf('admin') && { gruppe: 'Befehle', icon: 'i-history', titel: 'Sicherungen', tun: sicherungenDialog },
+      darf('admin') && { gruppe: 'Befehle', icon: 'i-users', titel: 'Nutzer & Rollen', tun: nutzerDialog },
+      darf('admin') && { gruppe: 'Befehle', icon: 'i-upload', titel: 'Excel-Import', tun: importDialog },
+      { gruppe: 'Befehle', icon: 'i-sun', titel: 'Darstellung wechseln (automatisch → hell → dunkel)', tun: darstellungWeiter },
+      { gruppe: 'Befehle', icon: 'i-refresh', titel: 'Aktualisieren', tun: () => laden() },
+      { gruppe: 'Befehle', icon: 'i-bolt', titel: 'Tastenkürzel', taste: '?', tun: tastenDialog }
+    ].filter(Boolean);
+  }
+  function bpSuchen(q) {
+    const teile = norm(q).split(/\s+/).filter(Boolean);
+    const bearbeiten = darf('bearbeiten');
+    const text = d => norm([d.kunde, d.ort, d.plz, d.zaehlpunkt, d.projekt_nr, d.fpj, d.ticket, d.zieher, d.mitarbeiter].join(' '));
+    const RANG = { ueberfaellig: 0, dringend: 1, bald: 2, ruhig: 3, unbekannt: 4 };
+    const fr = d => E.fristen(d, heute())[0];
+    let treffer = S.daten.filter(d => !d.geloescht_am);
+    if (teile.length) treffer = treffer.filter(d => { const t = text(d); return teile.every(x => t.includes(x)); });
+    else treffer = treffer.filter(d => { const f = fr(d); return f && RANG[f.stufe] <= RANG.dringend; });
+    treffer.sort((a, b) => { const fa = fr(a), fb = fr(b); return (fa ? RANG[fa.stufe] : 9) - (fb ? RANG[fb.stufe] : 9) || (a.kunde || '').localeCompare(b.kunde || '', 'de'); });
+    const aus = [];
+    treffer.slice(0, 8).forEach((d, i) => {
+      const st = E.status(d), n = E.aufgabe(d, st), f = fr(d);
+      aus.push({ gruppe: teile.length ? 'Förderungen' : 'Dringend', icon: 'i-doc', titel: d.kunde || '(ohne Namen)',
+        sub: [[d.plz, d.ort].filter(Boolean).join(' '), d.kwp ? zahlDE(d.kwp) + ' kWp' : '', st.fertig ? 'ausgezahlt' : st.ende ? st.ende.label : n ? n.todo : ''].filter(Boolean).join(' · '),
+        rechts: f && f.datum ? `bis ${datumDE(f.datum).slice(0, 6)}` : '', tun: () => oeffne(d) });
+      if (bearbeiten && n && !n.auto && i < 3 && teile.length) {
+        aus.push({ gruppe: 'Aktionen', icon: 'i-check', ok: true, titel: `${d.kunde}: ${n.knopf}`, sub: 'Nächsten Schritt heute erledigen – mit Rückgängig', taste: 'E',
+          tun: () => n.neben ? oeffne(d) : schnellErledigt(d.id, n.key) });
+      }
+    });
+    const befehle = bpBefehle().filter(b => !teile.length || teile.every(x => norm(b.titel).includes(x)));
+    return aus.filter(x => x.gruppe !== 'Aktionen').concat(aus.filter(x => x.gruppe === 'Aktionen'), befehle);
+  }
+  function bpZeichnen() {
+    const q = $('#bp-q').value;
+    BP.eintraege = bpSuchen(q);
+    BP.idx = Math.min(BP.idx, Math.max(0, BP.eintraege.length - 1));
+    let gruppe = '';
+    $('#bp-liste').innerHTML = BP.eintraege.length ? BP.eintraege.map((x, i) => {
+      const kopf = x.gruppe !== gruppe ? `<div class="bp-gruppe">${esc(gruppe = x.gruppe)}</div>` : '';
+      return kopf + `<button type="button" class="bp-eintrag ${i === BP.idx ? 'aktiv' : ''}" data-bp="${i}" role="option" aria-selected="${i === BP.idx}">
+        <svg class="${x.ok ? 'ok' : ''}"><use href="#${x.icon}"/></svg><span class="bp-text"><b>${esc(x.titel)}</b>${x.sub ? `<small>${esc(x.sub)}</small>` : ''}</span>
+        <span class="bp-rechts">${x.rechts ? esc(x.rechts) : ''}${x.taste ? `<kbd>${esc(x.taste)}</kbd>` : ''}</span></button>`;
+    }).join('') : `<div class="bp-leer">Nichts gefunden für „${esc(q)}“.</div>`;
+    const a = $('.bp-eintrag.aktiv', BP.el);
+    if (a) a.scrollIntoView({ block: 'nearest' });
+  }
+  function befehlspalette() {
+    if (BP.el) { $('#bp-q').select(); return; }
+    BP.idx = 0;
+    BP.el = document.createElement('div');
+    BP.el.className = 'bp';
+    BP.el.innerHTML = `<div class="bp-box" role="dialog" aria-modal="true" aria-label="Suchen und Befehle">
+      <label class="bp-feld"><svg><use href="#i-search"/></svg><input id="bp-q" placeholder="Kunde, Ort, Zählpunkt, FPJ … oder Befehl" autocomplete="off" spellcheck="false" role="combobox" aria-controls="bp-liste"><kbd>Esc</kbd></label>
+      <div class="bp-liste" id="bp-liste" role="listbox"></div>
+      <div class="bp-fuss"><span><kbd>↑</kbd><kbd>↓</kbd> wählen</span><span><kbd>↵</kbd> ausführen</span><span><kbd>Esc</kbd> schließen</span></div></div>`;
+    document.body.appendChild(BP.el);
+    const q = $('#bp-q');
+    q.addEventListener('input', () => { BP.idx = 0; bpZeichnen(); });
+    q.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        BP.idx = (BP.idx + (e.key === 'ArrowDown' ? 1 : -1) + BP.eintraege.length) % Math.max(1, BP.eintraege.length);
+        bpZeichnen();
+      } else if (e.key === 'Enter') { e.preventDefault(); bpAusfuehren(BP.idx); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); bpZu(); }
+    });
+    BP.el.addEventListener('mousemove', e => { const b = e.target.closest('[data-bp]'); if (b && +b.dataset.bp !== BP.idx) { BP.idx = +b.dataset.bp; $$('.bp-eintrag', BP.el).forEach((x, i) => x.classList.toggle('aktiv', i === BP.idx)); } });
+    BP.el.addEventListener('click', e => { const b = e.target.closest('[data-bp]'); if (b) bpAusfuehren(+b.dataset.bp); else if (e.target === BP.el) bpZu(); });
+    bpZeichnen();
+    q.focus();
+  }
+  function bpZu() { if (BP.el) { BP.el.remove(); BP.el = null; } }
+  function bpAusfuehren(i) {
+    const x = BP.eintraege[i];
+    if (!x) return;
+    bpZu();
+    x.tun();
+  }
+
+  // ---------------------------------------------------------------
+  // Tastatur – jede Taste hat auch einen sichtbaren Knopf
+  // ---------------------------------------------------------------
+  const TASTEN = [
+    [['⌘', 'K'], 'Suchen und Befehle'], [['/'], 'Liste filtern'], [['J'], 'nächste Förderung'], [['K'], 'vorige Förderung'],
+    [['↵'], 'Akte öffnen'], [['E'], 'nächsten Schritt heute erledigen (mit Rückgängig)'], [['N'], 'neuer Kunde'],
+    [['⌘', 'S'], 'Akte speichern'], [['⌘', 'Z'], 'letztes Erledigen rückgängig'], [['Esc'], 'schließen'], [['1', '–', '7'], 'Ticket-Tag: Feld kopieren'], [['?'], 'diese Übersicht']
+  ];
+  function tastenDialog() {
+    dialog('Tastenkürzel', `<div class="tasten">${TASTEN.map(([k, t]) => `<span>${k.map(x => x === '–' ? '–' : `<kbd>${esc(x)}</kbd>`).join('')}</span><span>${esc(t)}</span>`).join('')}</div>`);
+  }
+  const ZEILEN = '.z[data-id], .tabelle tbody tr[data-id], .tk[data-id]';
+  function zeileWechseln(schritt) {
+    if (S.detail) {
+      const ids = $$('.z[data-id], .tabelle tbody tr[data-id]').map(x => x.dataset.id).filter((x, i, a) => a.indexOf(x) === i);
+      const i = ids.indexOf(S.detail.rec.id);
+      const ziel = ids[i + schritt];
+      if (!ziel) return;
+      if (Object.keys(aenderungen()).length) { toast('Erst speichern (⌘S) oder Änderungen verwerfen.', 'fehler'); return; }
+      oeffne(S.daten.find(d => d.id === ziel));
+      return;
+    }
+    const zeilen = $$(ZEILEN);
+    if (!zeilen.length) return;
+    const i = zeilen.indexOf(document.activeElement.closest && document.activeElement.closest(ZEILEN));
+    const ziel = zeilen[i < 0 ? 0 : Math.max(0, Math.min(zeilen.length - 1, i + schritt))];
+    ziel.focus(); ziel.scrollIntoView({ block: 'nearest' });
+  }
+  function tastatur(e) {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); if (S.ich) befehlspalette(); return; }
+    if (BP.el) return;
+    const tippt = e.target.closest && e.target.closest('input, textarea, select, [contenteditable]');
+    if (mod && e.key.toLowerCase() === 'z' && !tippt && rueckgaengigFn) { e.preventDefault(); rueckgaengigMachen(); return; }
+    if (tippt || mod || e.altKey || !S.ich || !$('#dialog').hidden || document.querySelector('.overlay-frage')) return;
+    const k = e.key;
+    if (k === '/' && !S.detail) { e.preventDefault(); $('#f-suche').focus(); }
+    else if (k === '?') { e.preventDefault(); tastenDialog(); }
+    else if (k === 'j' || k === 'k') { e.preventDefault(); zeileWechseln(k === 'j' ? 1 : -1); }
+    else if (k === 'n' && darf('bearbeiten') && !S.detail) { e.preventDefault(); oeffne(null); }
+    else if (k === 'e' && darf('bearbeiten')) {
+      if (S.detail) { const b = $('#d-inhalt [data-jetzt]'); if (b) { e.preventDefault(); b.click(); } return; }
+      const z = document.activeElement.closest && document.activeElement.closest(ZEILEN);
+      const b = z && (z.querySelector('[data-schnell]') || z.querySelector('[data-tk-gezogen]'));
+      if (b) { e.preventDefault(); b.click(); }
+    }
+  }
+
+  // ---------------------------------------------------------------
   // Start
   // ---------------------------------------------------------------
   async function start() {
+    darstellungSetzen(speicherLokal.lesen('theme', 'auto'));
     verbinden();
     if (Q.demo) document.body.classList.add('demo');
     Q.onAuth((ev, session) => {
