@@ -1064,6 +1064,77 @@
   // ---------------------------------------------------------------
   // Dialog-Helfer
   // ---------------------------------------------------------------
+  // ---------------------------------------------------------------
+  // Sicherungen: jede Nacht automatisch (sql/archiv.sql + Edge Function foerder-taeglich).
+  // Hier: ansehen, als Excel holen, mit heute vergleichen, einzelne Förderungen zurückholen.
+  // ---------------------------------------------------------------
+  const kurzHash = h => h ? String(h).slice(0, 10) + '…' : '–';
+  async function sicherungenDialog() {
+    dialog('Sicherungen', '<p class="grau">wird geladen …</p>');
+    let liste;
+    try { liste = await Q.archivListe(); } catch (e) {
+      $('#dlg-inhalt').innerHTML = e.fehlt
+        ? `<p><b>Die tägliche Sicherung ist in der Datenbank noch nicht eingerichtet.</b></p>
+           <p>Einmal <span class="mono">sql/archiv.sql</span> im Supabase-Dashboard unter <b>SQL Editor</b> ausführen und die
+           Edge Function <span class="mono">foerder-taeglich</span> bereitstellen – Anleitung in <span class="mono">docs/EINSPIELEN.md</span>.</p>`
+        : `<p class="rot">${esc(E.fehlerText(e))}</p>`;
+      return;
+    }
+    const heuteDa = liste.some(a => a.tag === heute());
+    $('#dlg-inhalt').innerHTML = `<p>Jede Nacht wird die ganze Förderliste gesichert – unveränderbar, mit Prüfsumme, die mit der des Vortags verkettet ist.
+      Die Admins bekommen sie zusätzlich per Mail (CSV für Excel + JSON). Aufbewahrt werden alle Tage der letzten 90 Tage und danach jeder Monatserste.</p>
+      ${liste.length ? `<table class="mini-tabelle sich-tabelle"><thead><tr><th>Stand</th><th class="r">Förderungen</th><th>Prüfsumme</th><th>Datei · Mail</th><th></th></tr></thead><tbody>
+        ${liste.map(a => `<tr><td><b>${datumDE(a.tag)}</b><div class="klein grau">${new Date(a.erstellt_am).toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit' })} Uhr</div></td>
+          <td class="r">${a.anzahl}</td><td class="mono klein" title="${esc(a.sha256)}
+Vortag: ${esc(a.vorher_sha256 || '–')}">${esc(kurzHash(a.sha256))}</td>
+          <td class="klein">${a.datei ? '✓' : '<span class="grau">–</span>'} · ${a.versendet_am ? '✓' : '<span class="grau">–</span>'}</td>
+          <td class="r sich-knoepfe"><button class="btn btn-leise" data-sich="excel" data-tag="${a.tag}"><svg><use href="#i-download"/></svg>Excel</button>
+            <button class="btn btn-leise" data-sich="vergleich" data-tag="${a.tag}">Mit heute vergleichen</button></td></tr>`).join('')}
+        </tbody></table>` : '<p class="grau">Noch keine Sicherung vorhanden.</p>'}
+      <div id="sich-vergleich"></div>`;
+    $('#dlg-fuss').innerHTML = `${heuteDa ? '' : '<button class="btn" data-sich="jetzt"><svg><use href="#i-check"/></svg>Jetzt sichern</button>'}<button class="btn" data-aktion="dialog-zu">Schließen</button>`;
+  }
+  // Was ist seit der Sicherung anders? (ohne Zeitstempel)
+  function sicherungUnterschiede(alt) {
+    const ohne = d => { const x = Object.assign({}, d); delete x.geaendert_am; delete x.geaendert_von; delete x.erstellt_am; delete x.erstellt_von; return JSON.stringify(x, Object.keys(x).sort()); };
+    const jetzt = new Map(S.daten.map(d => [d.id, d]));
+    const aus = [];
+    alt.forEach(a => {
+      const d = jetzt.get(a.id);
+      if (!d) { aus.push({ a, art: 'gelöscht' }); return; }
+      if (ohne(a) === ohne(d)) return;
+      const felder = Object.keys(a).filter(k => !/^(geaendert|erstellt)_/.test(k) && JSON.stringify(a[k]) !== JSON.stringify(d[k]));
+      aus.push({ a, art: 'geändert', felder });
+    });
+    return aus;
+  }
+  async function sicherungAktion(b) {
+    const tag = b.dataset.tag;
+    try {
+      if (b.dataset.sich === 'jetzt') { await Q.archivJetzt(); toast('Gesichert.', 'ok'); return sicherungenDialog(); }
+      if (b.dataset.sich === 'excel') {
+        const alt = await Q.archivTag(tag);
+        return excelSpeichern(alt.filter(d => !d.geloescht_am).map(d => E.exportZeile(d, tag)), `EAG-Foerderungen_Sicherung_${tag}.xlsx`);
+      }
+      if (b.dataset.sich === 'vergleich') {
+        const unt = sicherungUnterschiede(await Q.archivTag(tag));
+        $('#sich-vergleich').innerHTML = `<h3 class="sich-titel">Seit ${datumDE(tag)} anders: ${unt.length || 'nichts'}</h3>
+          ${unt.length ? `<table class="mini-tabelle"><tbody>${unt.map(u => `<tr><td><b>${esc(u.a.kunde || '(ohne Namen)')}</b>
+            <div class="klein grau">${u.art === 'gelöscht' ? '<span class="rot">heute nicht mehr vorhanden</span>' : 'geändert: ' + esc(u.felder.map(k => FELD_LABEL[k] || k).join(', '))}</div></td>
+            <td class="r"><button class="btn btn-leise" data-sich="zurueck" data-tag="${tag}" data-id="${u.a.id}"><svg><use href="#i-restore"/></svg>Stand vom ${datumDE(tag)} zurückholen</button></td></tr>`).join('')}</tbody></table>` : ''}`;
+        return;
+      }
+      if (b.dataset.sich === 'zurueck') {
+        const alt = (await Q.archivTag(tag)).find(d => d.id === b.dataset.id);
+        if (!(await frage(`„${alt ? alt.kunde : ''}“ auf den Stand vom ${datumDE(tag)} zurücksetzen? Spätere Änderungen an dieser Förderung gehen verloren (im Verlauf bleiben sie sichtbar).`, 'Zurückholen', true))) return;
+        await Q.archivWiederherstellen(tag, b.dataset.id);
+        await laden(true);
+        toast('Zurückgeholt.', 'ok');
+        b.closest('tr').remove();
+      }
+    } catch (e) { toast(E.fehlerText(e), 'fehler'); }
+  }
+
   function dialog(titel, inhalt, fuss) {
     $('#dlg-titel').textContent = titel;
     $('#dlg-inhalt').innerHTML = inhalt;
@@ -1082,24 +1153,10 @@
   function exportieren() {
     if (!window.XLSX) { toast('Excel-Modul lädt noch – bitte gleich nochmal.', 'fehler'); return; }
     const liste = sortiere(aktuelleListe());
-    const zeilen = liste.map(({ d, st }) => {
-      const z = {
-        'Jahr': d.jahr, 'Programm': d.programm, 'Fördercall': datumDE(d.foerdercall), 'Mitarbeiter': d.mitarbeiter, 'Ticket-Zieher': d.zieher,
-        'Kunde': d.kunde, 'Geb. Dat': datumDE(d.geburtsdatum), 'Vollmacht': d.vollmacht, 'Straße': d.strasse, 'PLZ': d.plz, 'Ort': d.ort,
-        'KG Grundstücksnummer': d.kg_gst, 'Einspeisezählpunkt': d.zaehlpunkt, 'Mail': d.mail, 'Projekt': d.projekt_nr,
-        'Größe kWp': d.kwp, 'Modulfläche m²': d.modulflaeche, 'Einspeisung': d.einspeisung, 'WR Nennleistung': d.wr_leistung,
-        'Speicher': d.speicher, 'Anbringung': d.anbringung, 'Zeitplan': d.zeitplan, 'Art': d.art, 'Ticket': d.ticket, 'FPJ': d.fpj
-      };
-      SCHRITTE.filter(s => !s.auto).forEach(s => { const w = (d.schritte || {})[s.key]; z[s.label] = w ? (w === '✓' ? '✓' : datumDE(w)) : ''; });
-      Object.keys(E.NEBEN).forEach(k => { const w = (d.schritte || {})[k]; z[E.NEBEN[k]] = w ? (E.istDatum(w) ? datumDE(w) : callsText(w)) : ''; });
-      const ew = st.ende ? (d.schritte || {})[st.ende.key] : '';
-      const fr = E.fristen(d, heute())[0];
-      z['Ergebnis'] = st.ende ? st.ende.label + (E.istDatum(ew) ? ' ' + datumDE(ew) : '') : '';
-      z['Nächster Schritt'] = st.fertig ? 'fertig' : st.ende ? '' : E.aufgabe(d, st).todo;
-      z['Nächste Frist'] = fr ? `${fr.label}: ${fr.datum ? datumDE(fr.datum) + (fr.geschaetzt ? ' (frühestens)' : '') : 'unbekannt'}` : '';
-      z['Offene Punkte'] = d.offene_punkte; z['Info'] = d.info;
-      return z;
-    });
+    excelSpeichern(liste.map(({ d }) => E.exportZeile(d, heute())), `EAG-Foerderungen_${heute()}.xlsx`);
+  }
+  function excelSpeichern(zeilen, dateiname) {
+    if (!window.XLSX) { toast('Excel-Modul lädt noch – bitte gleich nochmal.', 'fehler'); return; }
     const X = window.XLSX;
     const ws = X.utils.json_to_sheet(zeilen);
     const spalten = Object.keys(zeilen[0] || { Kunde: '' });
@@ -1107,7 +1164,7 @@
     ws['!autofilter'] = { ref: ws['!ref'] };
     const wb = X.utils.book_new();
     X.utils.book_append_sheet(wb, ws, 'Förderungen');
-    X.writeFile(wb, `EAG-Foerderungen_${heute()}.xlsx`);
+    X.writeFile(wb, dateiname);
   }
 
   // ---------------------------------------------------------------
@@ -1435,6 +1492,7 @@
         case 'export': exportieren(); break;
         case 'import': importDialog(); break;
         case 'nutzer': nutzerDialog(); break;
+        case 'sicherungen': sicherungenDialog(); break;
         case 'passwort': $('#nutzer-menue').hidden = true; passwortDialog(false); break;
         case 'abmelden': $('#nutzer-menue').hidden = true; await Q.abmelden(); S.ich = null; S.daten = []; zeige('login'); setzeLoginModus('anmelden'); break;
         case 'neu-laden': await laden(); toast('Aktualisiert.', 'ok'); break;
@@ -1572,6 +1630,7 @@
       else if (e.target.closest('#w-excel')) wuerfelExcel();
       else if (e.target.closest('#w-uebernehmen')) wuerfelUebernehmen();
       else if (e.target.closest('#pw-los')) passwortSpeichern();
+      else if (e.target.closest('[data-sich]')) sicherungAktion(e.target.closest('[data-sich]'));
       else nutzerAktion(e);
     });
 

@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/app.css?v=13">
+  <link rel="stylesheet" href="css/app.css?v=14">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -82,6 +82,7 @@
             <div class="menue-info"><b id="nutzer-name"></b><span id="nutzer-mail" class="grau"></span><span class="rolle" id="nutzer-rolle"></span></div>
             <button class="menue-punkt" data-aktion="export"><svg><use href="#i-download"/></svg>Als Excel herunterladen</button>
             <button class="menue-punkt" data-aktion="nutzer" data-recht="admin"><svg><use href="#i-users"/></svg>Nutzer &amp; Rollen</button>
+            <button class="menue-punkt" data-aktion="sicherungen" data-recht="admin"><svg><use href="#i-history"/></svg>Sicherungen</button>
             <button class="menue-punkt" data-aktion="neu-laden"><svg><use href="#i-refresh"/></svg>Aktualisieren</button>
             <button class="menue-punkt" data-aktion="passwort"><svg><use href="#i-user"/></svg>Passwort ändern</button>
             <button class="menue-punkt" data-aktion="abmelden"><svg><use href="#i-logout"/></svg>Abmelden</button>
@@ -150,9 +151,9 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
   <script src="js/config.js?v=1"></script>
-  <script src="js/ablauf.js?v=4"></script>
-  <script src="js/daten.js?v=7"></script>
+  <script src="js/ablauf.js?v=5"></script>
+  <script src="js/daten.js?v=8"></script>
   <script src="js/import.js?v=2"></script>
-  <script src="js/app.js?v=12"></script>
+  <script src="js/app.js?v=13"></script>
 </body>
 </html>

@@ -313,3 +313,38 @@ test('Neu ansuchen löscht auch Uhrzeit und Würfel-Vermerk des alten Tickets', 
   assert.equal(p.schritte.ticket_uhrzeit, undefined);
   assert.equal(p.schritte.zieher_geplant, undefined);
 });
+
+// ── Export und täglicher Lauf ─────────────────────────────────────
+test('Edge Function foerder-taeglich nutzt dieselben Regeln (Kopie von js/ablauf.js ist aktuell)', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const original = fs.readFileSync(path.join(__dirname, '../js/ablauf.js'), 'utf8');
+  const kopie = fs.readFileSync(path.join(__dirname, '../supabase/functions/foerder-taeglich/ablauf.js'), 'utf8');
+  assert.equal(kopie, original, 'Bitte js/ablauf.js nach supabase/functions/foerder-taeglich/ablauf.js kopieren');
+});
+
+test('Export-Zeile: Datum deutsch, Ticket-Uhrzeit, nächste Frist', () => {
+  const z = A.exportZeile(basis({ projekt: '2026-09-20', ticket: '2026-10-08', ticket_uhrzeit: '17:00:04' }), '2026-10-09');
+  assert.equal(z['Fördercall'], '08.10.2026');
+  assert.equal(z['Ticket gezogen'], '08.10.2026');
+  assert.equal(z['Ticket gezogen um'], '17:00:04');
+  assert.equal(z['Nächster Schritt'], 'Antrag im Portal einreichen');
+  assert.equal(z['Nächste Frist'], 'Antrag einreichen: 22.10.2026');
+});
+
+test('CSV für Excel: BOM, Strichpunkt, Komma-Zahlen, keine Formeln', () => {
+  const t = A.csv([{ Kunde: 'Huber; "Sepp"', kWp: 9.9, Notiz: '=HYPERLINK("x")' }]);
+  assert.ok(t.startsWith('﻿Kunde;kWp;Notiz\r\n'));
+  assert.ok(t.includes('"Huber; ""Sepp"""'));
+  assert.ok(t.includes(';9,9;'));
+  assert.ok(t.includes(`"'=HYPERLINK(""x"")"`));
+});
+
+test('Überfällige Fristen für den Lauf: nur echte Daten in der Vergangenheit, nichts aus dem Papierkorb', () => {
+  const vorbei = basis({ projekt: '✓' }, { foerdercall: '2026-06-16' });           // Ticket verpasst
+  const geloescht = basis({ projekt: '✓' }, { foerdercall: '2026-06-16', geloescht_am: '2026-07-01' });
+  const ok = basis({ projekt: '✓' });                                               // Ticket erst am 08.10.
+  const v = A.verpassteFristen([vorbei, geloescht, ok], '2026-10-01');
+  assert.equal(v.length, 1);
+  assert.equal(v[0].frist.art, 'ticket');
+  assert.ok(v[0].frist.tage < 0);
+});

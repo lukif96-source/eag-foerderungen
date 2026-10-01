@@ -755,3 +755,10 @@ body.demo .kopf::after { content: "DEMO – keine echten Daten"; position: absol
 .tk-kopie.kopiert { background: var(--gruen-hell); border-color: var(--gruen); color: var(--gruen-dunkel); }
 .tk-kopie.kopiert kbd { background: var(--gruen); color: #fff; }
 @media (max-width: 760px) { .tk-stand { margin-left: 0; width: 100%; justify-content: flex-start; } }
+
+/* Sicherungen */
+.sich-tabelle td { vertical-align: middle; }
+.sich-knoepfe { white-space: nowrap; }
+.sich-knoepfe .btn { height: 30px; padding: 0 9px; font-size: 12.5px; }
+.sich-titel { font-size: 14px; margin: 18px 0 6px; }
+@media (max-width: 760px) { .sich-knoepfe { white-space: normal; } .sich-tabelle th:nth-child(3), .sich-tabelle td:nth-child(3) { display: none; } }

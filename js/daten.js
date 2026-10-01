@@ -26,6 +26,14 @@
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
     });
     const pruefe = ({ data, error }) => { if (error) throw new Error(fehlerText(error)); return data; };
+    const archivRpc = ({ data, error }) => {
+      if (error) {
+        const e = new Error(fehlerText(error));
+        e.fehlt = error.code === 'PGRST202' || error.code === '42883' || /Could not find the function/i.test(error.message || '');
+        throw e;
+      }
+      return data;
+    };
 
     return {
       demo: false,
@@ -74,6 +82,11 @@
       async kontoAblehnen(mail) { pruefe(await sb.rpc('foerder_konto_ablehnen', { p_email: mail })); },
       async nutzerSpeichern(n) { return pruefe(await sb.from('foerder_nutzer').upsert(n).select().single()); },
       async nutzerLoeschen(mail) { pruefe(await sb.from('foerder_nutzer').delete().eq('email', mail)); },
+      // Tägliche Sicherungen (sql/archiv.sql) – fehlt die Einrichtung, wirft das mit e.fehlt = true
+      async archivListe() { return archivRpc(await sb.rpc('foerder_archiv_liste')); },
+      async archivTag(tag) { return archivRpc(await sb.rpc('foerder_archiv_tag', { p_tag: tag })) || []; },
+      async archivJetzt() { return archivRpc(await sb.rpc('foerder_archivieren')); },
+      async archivWiederherstellen(tag, id) { archivRpc(await sb.rpc('foerder_archiv_wiederherstellen', { p_tag: tag, p_id: id })); },
       async massenAnlegen(recs) {
         const out = [];
         for (let i = 0; i < recs.length; i += 200) out.push(...pruefe(await sb.from('foerderungen').insert(recs.slice(i, i + 200)).select()));
@@ -133,6 +146,12 @@
       });
     }
     beispiel();
+    // Demo-Sicherungen: gestern (eine Förderung anders, eine noch vorhanden, die es heute nicht mehr gibt)
+    const hashText = t => Array.from(t).reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(16).padStart(8, '0').repeat(8);
+    const gestern = kopie(daten);
+    gestern[2].kunde = gestern[2].kunde + ' (alter Name)';
+    gestern.push(Object.assign(kopie(gestern[0]), { id: neuId(), kunde: 'Gelöscht Gustav' }));
+    const archiv = [{ tag: A.plusTage(A.heuteText(), -1), erstellt_am: jetzt(), daten: gestern, sha256: hashText('g'), vorher_sha256: hashText('v') }];
     function logge(id, aktion, diff) { verlauf.unshift({ id: verlauf.length + 1, foerderung_id: id, zeit: jetzt(), von: ich.name, aktion, aenderungen: diff || {} }); }
     let authCb = null;
     let angemeldet = true;
@@ -167,7 +186,21 @@
       async kontoAblehnen(mail) { wartend = wartend.filter(k => k.email !== mail); },
       async nutzerSpeichern(n) { nutzer = nutzer.filter(x => x.email !== n.email).concat([n]); wartend = wartend.filter(k => k.email !== n.email); return kopie(n); },
       async nutzerLoeschen(mail) { nutzer = nutzer.filter(x => x.email !== mail); },
-      async massenAnlegen(recs) { const out = []; for (const r of recs) out.push(await this.anlegen(r)); return out; }
+      async massenAnlegen(recs) { const out = []; for (const r of recs) out.push(await this.anlegen(r)); return out; },
+      async archivListe() { return archiv.map(a => ({ tag: a.tag, erstellt_am: a.erstellt_am, anzahl: a.daten.length, sha256: a.sha256, vorher_sha256: a.vorher_sha256, datei: a.tag + '.json', versendet_am: a.erstellt_am })); },
+      async archivTag(tag) { const a = archiv.find(x => x.tag === tag); return a ? kopie(a.daten) : []; },
+      async archivJetzt() {
+        const tag = A.heuteText();
+        if (!archiv.some(a => a.tag === tag)) archiv.unshift({ tag, erstellt_am: jetzt(), daten: kopie(daten), sha256: hashText(tag + daten.length), vorher_sha256: archiv[0] ? archiv[0].sha256 : null });
+        return tag;
+      },
+      async archivWiederherstellen(tag, id) {
+        const alt = (archiv.find(a => a.tag === tag) || { daten: [] }).daten.find(d => d.id === id);
+        if (!alt) throw new Error('In dieser Sicherung gibt es die Förderung nicht.');
+        const r = daten.find(d => d.id === id);
+        if (r) Object.assign(r, kopie(alt), { geaendert_am: jetzt(), geaendert_von: ich.name }); else daten.push(Object.assign(kopie(alt), { geaendert_am: jetzt() }));
+        logge(id, 'aus Sicherung ' + tag);
+      }
     };
   }
 

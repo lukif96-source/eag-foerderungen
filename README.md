@@ -58,6 +58,14 @@ in der Akte. Am 9.10. heißt die Karte „heute eintragen, wer gezogen hat“; a
 Excel-Import: orange-rot markierte Zeilen (abgelehnt) kommen direkt in den offenen Call;
 schon importierte Einträge werden beim erneuten Import einmalig umgestellt.
 
+## Tägliche Sicherung
+Jede Nacht (02:15) wird die ganze Förderliste gesichert: unveränderbar in der Datenbank (`foerder_archiv`, mit
+SHA-256, verkettet mit dem Vortag), als Datei im privaten Storage und per Mail an die Admins (CSV für Excel + JSON).
+Dabei werden überfällige Fristen protokolliert. Aufbewahrung: 90 Tage täglich, danach jeder Monatserste.
+In der App: ☰ → **Sicherungen** (Admins) – Excel je Tag, „Mit heute vergleichen“, einzelne Förderungen zurückholen.
+Einrichtung: `docs/EINSPIELEN.md` (`sql/archiv.sql` + Edge Function `foerder-taeglich`).
+Die Edge Function enthält eine Kopie von `js/ablauf.js` – nach jeder Regeländerung mitkopieren (ein Test prüft das).
+
 ## Rollen
 | Rolle | darf |
 |---|---|
