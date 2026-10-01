@@ -202,3 +202,8 @@ test('Weitergeleitete Ticket-Mail: Ticketdatum aus dem Text bleibt maßgeblich',
   assert.equal(e.datum, '2026-06-16');
   assert.equal(e.uhrzeit, '17:04:35');
 });
+
+test('Zählpunkt mit geschützten Leerzeichen (aus HTML/Outlook) wird erkannt', () => {
+  const e = O.lesen({ betreff: 'Ticket', text: 'Zählpunkt AT003000 00000 00000 00000 00309 99333' });
+  assert.equal(e.zaehlpunkt, 'AT0030000000000000000000030999333');
+});

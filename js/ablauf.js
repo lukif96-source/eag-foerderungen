@@ -496,7 +496,7 @@
       const t = typeof v === 'number' ? String(v).replace('.', ',') : String(v);
       return /[";\r\n]/.test(t) || /^[=+\-@]/.test(t) ? '"' + t.replace(/"/g, '""').replace(/^([=+\-@])/, "'$1") + '"' : t;
     };
-    return '\uFEFF' + [spalten.map(zelle).join(';')].concat(zeilen.map(z => spalten.map(k => zelle(z[k])).join(';'))).join('\r\n') + '\r\n';
+    return String.fromCharCode(0xFEFF) + [spalten.map(zelle).join(';')].concat(zeilen.map(z => spalten.map(k => zelle(z[k])).join(';'))).join('\r\n') + '\r\n';
   }
 
   // Überfällige Fristen (für den täglichen Lauf): je Förderung alle Fristen mit Datum in der Vergangenheit

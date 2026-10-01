@@ -42,7 +42,7 @@
       .replace(/&quot;/g, '"').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/[ \t]+/g, ' ');
   }
   // Leerzeichen zwischen Ziffern/Großbuchstaben entfernen: „AT003000 00000 … 20285“ → „AT003000…20285“
-  const kompakt = t => String(t).replace(/([0-9A-Z])[  ]+(?=[0-9A-Z])/g, '$1');
+  const kompakt = t => String(t).replace(/([0-9A-Z])[^\S\r\n]+(?=[0-9A-Z])/g, '$1');
 
   // Weitergeleitete Mail: Datum der Originalmail aus dem Kopfblock („Gesendet: Montag, 3. August 2026 08:12“,
   // „Sent: Monday, August 3, 2026 8:12 AM“, „Datum: 03.08.2026 08:12“). Sonst null.

@@ -54,7 +54,7 @@
   }
   function text(v) {
     if (v === null || v === undefined) return '';
-    return String(v).replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+    return String(v).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   }
   function zahl(v) {
     if (typeof v === 'number') return v;
