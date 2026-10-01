@@ -33,6 +33,13 @@ zurückgezogen, Zusage erloschen. **Abgelehnt → „Neu ansuchen“** setzt Tic
 behält das Portal-Projekt und merkt sich den alten Call – solange noch ein Call offen ist.
 Laut SOLPRO ist der Call vom 8.–22.10.2026 der letzte; 2027 gibt es keinen.
 
+**Status-Tracker** oben in jeder Akte: je Phase ein Abschnitt, je Schritt ein Strich (grün = erledigt,
+Rahmen = jetzt dran, schraffiert = Förderstelle ist dran, rot = übersprungen), darunter der nächste Schritt,
+wer dran ist und die dringendste Frist. Berechnet von `tracker()` in `js/ablauf.js`.
+
+Weiterentwicklung (UI, Revisionssicherheit, Messtool, weitere Programme): `docs/BLUEPRINT.md`.
+Vorschlag für ein unveränderbares Protokoll: `sql/vorschlag-revision.sql` (noch nicht eingespielt).
+
 Die Regeln stehen an **einer** Stelle: `js/ablauf.js` (ohne Seite, ohne Datenbank), getestet mit
 `node --test` (läuft auch bei jedem Push auf GitHub). Fristen werden berechnet, nie gespeichert.
 Ohne Vertragsdatum ist eine Frist „unbekannt“ und steht rot ganz oben – mit dem frühestmöglichen Datum.

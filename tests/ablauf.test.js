@@ -188,3 +188,53 @@ test('Verteilen: gleichmäßig, bestehende Zuteilung bleibt, weggefallene Namen 
   const zaehl = {}; [{ zieher: 'Verena' }].concat(neu.map(x => ({ zieher: x.zieher }))).forEach(x => { zaehl[x.zieher] = (zaehl[x.zieher] || 0) + 1; });
   assert.deepEqual(Object.values(zaehl).sort(), [2, 2, 2]);  // 6 Tickets auf 3 Personen
 });
+
+// ── Status-Tracker ────────────────────────────────────────────────
+test('Tracker eine Woche vor dem Ticket-Tag: Call-Phase aktiv, Alarm, wir sind dran', () => {
+  const t = A.tracker(basis({ projekt: '2026-09-20' }), '2026-10-01');
+  assert.equal(t.zustand, 'aktiv');
+  assert.equal(t.ton, 'alarm');                     // 7 Tage = dringend
+  assert.equal(t.nummer, A.IDX.ticket + 1);
+  assert.equal(t.aktion.key, 'ticket');
+  assert.equal(t.aktion.wer, 'wir');
+  assert.equal(t.frist.art, 'ticket');
+  assert.deepEqual(t.phasen.map(p => p.zustand), ['fertig', 'aktiv', 'offen', 'offen', 'offen']);
+  assert.equal(t.phasen.reduce((s, p) => s + p.gesamt, 0), A.SCHRITTE.length);
+  assert.equal(t.phasen[1].schritte[0].zustand, 'jetzt');
+});
+
+test('Tracker beim Warten auf den Vertrag: Förderstelle ist dran, ruhig', () => {
+  const t = A.tracker(basis({ projekt: '✓', ticket: '2026-10-08', eingereicht: '2026-10-09' }), '2026-10-12');
+  assert.equal(t.zustand, 'wartet');
+  assert.equal(t.aktion.wer, 'foerderstelle');
+  assert.equal(t.phasen[2].zustand, 'aktiv');
+  assert.equal(t.phasen[2].schritte[0].zustand, 'wartet');
+  assert.equal(t.ton, 'ruhig');
+});
+
+test('Tracker: Vertrag ohne Datum → Frist unbekannt = Alarm', () => {
+  const t = A.tracker(basis({ projekt: '✓', ticket: '✓', eingereicht: '✓', vertrag_erhalten: '✓' }), '2026-12-01');
+  assert.equal(t.frist.stufe, 'unbekannt');
+  assert.equal(t.ton, 'alarm');
+});
+
+test('Tracker: Lücke färbt die Phase und macht aufmerksam', () => {
+  const t = A.tracker(basis({ projekt: '✓', eingereicht: '✓' }, { foerdercall: '' }), '2026-10-01');
+  assert.deepEqual(t.luecken, ['Ticket gezogen']);
+  assert.equal(t.phasen[1].zustand, 'luecke');
+  assert.equal(t.ton, 'achtung');
+});
+
+test('Tracker: abgelehnt und ausgezahlt haben keine Aktion', () => {
+  const ab = A.tracker(basis({ projekt: '✓', abgelehnt: '2026-07-10' }), '2026-10-01');
+  assert.equal(ab.zustand, 'beendet');
+  assert.equal(ab.aktion, null);
+  assert.equal(ab.ende.datum, '2026-07-10');
+  assert.equal(ab.phasen[0].zustand, 'fertig');
+  assert.equal(ab.phasen[1].zustand, 'gestoppt');
+  const alle = Object.fromEntries(A.SCHRITTE.filter(s => !s.auto).map(s => [s.key, '✓']));
+  const fertig = A.tracker(basis(alle), '2026-10-01');
+  assert.equal(fertig.zustand, 'fertig');
+  assert.equal(fertig.erledigt, A.SCHRITTE.length);
+  assert.ok(fertig.phasen.every(p => p.zustand === 'fertig'));
+});

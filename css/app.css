@@ -700,3 +700,31 @@ body.demo .kopf::after { content: "DEMO – keine echten Daten"; position: absol
   .tt-form input { flex: none; }
   .tt-form .btn { justify-content: center; }
 }
+
+/* Status-Tracker oben in „Als Nächstes“: je Phase ein Abschnitt (Breite = Anzahl Schritte), je Schritt ein Strich.
+   Farbe trägt nur Bedeutung: Grün = erledigt, Text-Rahmen = jetzt dran, schraffiert = Förderstelle, Rot = Lücke. */
+.tr { flex: 1 1 100%; display: flex; gap: 10px; padding-bottom: 12px; margin-bottom: 2px; border-bottom: 1px solid color-mix(in srgb, var(--text) 9%, transparent); }
+.tr-ph { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.jetzt-text { min-width: min(220px, 100%); }
+.jetzt-frist .frist { white-space: normal; max-width: 100%; }
+.tr-kopf { display: flex; justify-content: space-between; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; }
+.tr-kopf span { overflow: hidden; text-overflow: ellipsis; }
+.tr-kopf b { font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.tr-aktiv .tr-kopf, .tr-luecke .tr-kopf { color: var(--text); }
+.tr-fertig .tr-kopf { color: var(--gruen-dunkel); }
+.tr-luecke .tr-kopf b { color: var(--rot); }
+.tr-striche { display: flex; gap: 3px; }
+.tr-s { flex: 1; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--text) 10%, transparent); transition: background .2s; }
+.tr-s-fertig { background: var(--gruen); }
+.tr-s-jetzt { background: var(--flaeche); box-shadow: inset 0 0 0 1.5px var(--text); animation: tr-puls 1.6s ease-in-out infinite; }
+.tr-s-wartet { background: repeating-linear-gradient(-45deg, var(--text-3) 0 2px, transparent 2px 5px); }
+.tr-s-luecke { background: var(--rot); }
+.tr-gestoppt .tr-s:not(.tr-s-fertig) { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent); }
+.jetzt-dringend .tr-s-jetzt { box-shadow: inset 0 0 0 1.5px var(--rot); }
+@keyframes tr-puls { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .tr-s-jetzt { animation: none; } }
+@media (max-width: 760px) {
+  .tr { gap: 6px; }
+  .tr-kopf b { display: none; }
+  .tr-ph:not(.tr-aktiv):not(.tr-luecke) .tr-kopf span { visibility: hidden; }
+}

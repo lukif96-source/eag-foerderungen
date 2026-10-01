@@ -687,23 +687,35 @@
     return jetztKasten(rec, nurLesen, neu) + punkteHtml;
   }
 
+  // Status-Tracker: je Phase ein Abschnitt, je Schritt ein Strich – auf einen Blick, wo die Förderung steht
+  const TR_ZUSTAND = { fertig: 'erledigt', jetzt: 'jetzt dran', wartet: 'wartet auf Förderstelle', luecke: 'übersprungen?', offen: 'offen' };
+  function trackerLeiste(t) {
+    return `<div class="tr" role="img" aria-label="${esc(`${t.erledigt} von ${t.gesamt} Schritten erledigt`)}">${t.phasen.map(p =>
+      `<div class="tr-ph tr-${p.zustand}" style="flex:${p.gesamt}">
+        <div class="tr-kopf"><span>${esc(p.label)}</span><b>${p.fertig}/${p.gesamt}</b></div>
+        <div class="tr-striche">${p.schritte.map(x => `<i class="tr-s tr-s-${x.zustand}" title="${esc(x.label)} · ${esc(x.wert && x.wert !== '✓' ? datumDE(x.wert) : TR_ZUSTAND[x.zustand])}"></i>`).join('')}</div>
+      </div>`).join('')}</div>`;
+  }
+
   function jetztKasten(rec, nurLesen, neu) {
     if (neu) return '<div class="jetzt jetzt-neu"><div class="jetzt-text"><small>Neuer Kunde</small><b>Daten eintragen und speichern</b></div></div>';
     const st = E.status(rec);
-    if (st.fertig) return '<div class="jetzt jetzt-fertig"><div class="jetzt-text"><small>Stand</small><b>Komplett erledigt – ausgezahlt</b></div></div>';
+    const t = E.tracker(rec, heute());
+    const leiste = trackerLeiste(t);
+    if (st.fertig) return `<div class="jetzt jetzt-fertig">${leiste}<div class="jetzt-text"><small>Stand</small><b>Komplett erledigt – ausgezahlt</b></div></div>`;
     if (st.ende) {
       const w = (rec.schritte || {})[st.ende.key];
       const call = E.offenerCall(heute());
       const text = st.ende.key !== 'abgelehnt' ? 'Keine weiteren Schritte.'
         : call ? `Neu ansuchen geht bis ${datumDE(E.callEnde(call))}: Ticket am ${datumDE(call)} ab 17:00 Uhr.` : 'Kein Fördercall mehr offen – 2027 gibt es keinen.';
-      return `<div class="jetzt jetzt-ende"><div class="jetzt-text"><small>Beendet</small><b>${esc(st.ende.label)}${w && w !== '✓' ? ' am ' + datumDE(w) : ''}</b><span>${esc(text)}</span></div>
+      return `<div class="jetzt jetzt-ende">${leiste}<div class="jetzt-text"><small>Beendet</small><b>${esc(st.ende.label)}${w && w !== '✓' ? ' am ' + datumDE(w) : ''}</b><span>${esc(text)}</span></div>
         ${st.ende.key === 'abgelehnt' && call && !nurLesen ? `<button class="erledigt erledigt-gross" data-neu-ansuchen-detail><svg><use href="#i-restore"/></svg>Im Call ${esc(datumDE(call))} neu ansuchen</button>` : ''}</div>`;
     }
     const n = E.aufgabe(rec, st);
-    const fr = E.fristen(rec, heute())[0];
+    const fr = t.frist;
     const hinweis = n.key === 'daten' ? 'Unten die fehlenden Angaben ergänzen: ' + E.fehlendeDaten(rec).join(', ') : (n.hilfe || '');
-    const laut = fr && ['unbekannt', 'ueberfaellig', 'dringend'].includes(fr.stufe);
-    return `<div class="jetzt ${laut ? 'jetzt-dringend' : ''}"><div class="jetzt-text"><small>Als Nächstes · ${n.neben ? 'Nebenschritt' : `Schritt ${st.naechster + 1} von ${SCHRITTE.length}`}</small><b>${esc(n.todo)}</b>${n.warten ? '<span>Wartet auf die Förderstelle – abhaken, sobald es da ist.</span>' : ''}${hinweis ? `<span>${esc(hinweis)}</span>` : ''}${fr ? `<span class="jetzt-frist">${fristBadge(fr, true)}</span>` : ''}</div>
+    const wer = t.aktion.wer === 'foerderstelle' ? 'Förderstelle ist dran' : 'Wir sind dran';
+    return `<div class="jetzt ${t.ton === 'alarm' ? 'jetzt-dringend' : ''}">${leiste}<div class="jetzt-text"><small>Als Nächstes · ${n.neben ? 'Nebenschritt' : `Schritt ${t.nummer} von ${t.gesamt}`} · ${wer}</small><b>${esc(n.todo)}</b>${n.warten ? '<span>Wartet auf die Förderstelle – abhaken, sobald es da ist.</span>' : ''}${hinweis ? `<span>${esc(hinweis)}</span>` : ''}${fr ? `<span class="jetzt-frist">${fristBadge(fr, true)}</span>` : ''}</div>
       ${!nurLesen && !n.auto ? `<button class="erledigt erledigt-gross" data-jetzt="${n.key}"><svg><use href="#i-check"/></svg>${esc(n.knopf)} – speichern</button>` : ''}</div>`;
   }
 

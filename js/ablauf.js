@@ -197,6 +197,53 @@
   }
 
   // ---------------------------------------------------------------
+  // Status-Tracker: alles, was die Kopfzeile einer Förderung braucht – in einem Objekt.
+  // Wo steht sie (je Phase), was ist jetzt zu tun, wer ist dran, wie laut muss es sein.
+  // Ohne HTML: dieselbe Antwort für die Seite, Tests und später andere Oberflächen.
+  // ---------------------------------------------------------------
+  // ton: alarm = Frist unbekannt, überfällig oder ≤ 7 Tage · achtung = Lücke oder ≤ 30 Tage · ruhig
+  function tracker(f, heute) {
+    heute = heute || heuteText();
+    const st = status(f);
+    const aufg = aufgabe(f, st);
+    const frist = fristen(f, heute)[0] || null;
+    const s = f.schritte || {};
+    const schritte = SCHRITTE.map((x, i) => ({
+      key: x.key, kurz: x.kurz, label: x.label,
+      wert: schrittWert(f, x.key),
+      zustand: st.erledigt[i] ? 'fertig' : st.luecken.includes(i) ? 'luecke' : i === st.naechster ? (x.warten ? 'wartet' : 'jetzt') : 'offen'
+    }));
+    const phasen = PHASEN.map(p => {
+      const eigene = schritte.filter((x, i) => SCHRITTE[i].phase === p.key);
+      const fertig = eigene.filter(x => x.zustand === 'fertig').length;
+      const zustand = st.ende ? (fertig === eigene.length ? 'fertig' : 'gestoppt')
+        : eigene.some(x => x.zustand === 'luecke') ? 'luecke'
+        : (aufg && aufg.phase === p.key) ? 'aktiv'
+        : fertig === eigene.length ? 'fertig' : 'offen';
+      return { key: p.key, label: p.label, fertig, gesamt: eigene.length, zustand, schritte: eigene };
+    });
+    const ton = frist && RANG[frist.stufe] <= RANG.dringend ? 'alarm'
+      : (st.luecken.length || (frist && frist.stufe === 'bald')) ? 'achtung' : 'ruhig';
+    const zustand = st.fertig ? 'fertig' : st.ende ? 'beendet' : aufg.warten ? 'wartet' : 'aktiv';
+    return {
+      zustand, ton,
+      // Hauptschritt-Nummer (1-basiert); bei Nebenschritt die Stelle davor
+      nummer: st.naechster >= 0 ? st.naechster + 1 : null,
+      gesamt: SCHRITTE.length,
+      erledigt: st.erledigt.filter(Boolean).length,
+      phasen,
+      aktion: aufg ? {
+        key: aufg.key, todo: aufg.todo, knopf: aufg.knopf, phase: aufg.phase,
+        wer: aufg.warten ? 'foerderstelle' : 'wir',
+        auto: !!aufg.auto, neben: !!aufg.neben, hilfe: aufg.hilfe || ''
+      } : null,
+      frist,
+      ende: st.ende ? { key: st.ende.key, label: st.ende.label, datum: istDatum(s[st.ende.key]) ? s[st.ende.key] : null } : null,
+      luecken: st.luecken.map(i => SCHRITTE[i].label)
+    };
+  }
+
+  // ---------------------------------------------------------------
   // Abgelehnt → im nächsten offenen Call neu ansuchen
   // ---------------------------------------------------------------
   function offenerCall(heute) {
@@ -296,7 +343,7 @@
   const API = {
     PHASEN, SCHRITTE, IDX, ENDE, NEBEN, CALLS, LETZTER_CALL, PFLICHT, FELDER, SAETZE_2026,
     leer, istDatum, plusTage, plusMonate, heuteText, callEnde, fehlendeDaten, schrittWert, status, aufgabe,
-    inbetriebnahmeFrist, fristen, offenerCall, naechsterTicketTag, zieherVerteilen, neuAnsuchen, zpPruefung, kategorie, zuschuss,
+    inbetriebnahmeFrist, fristen, tracker, offenerCall, naechsterTicketTag, zieherVerteilen, neuAnsuchen, zpPruefung, kategorie, zuschuss,
     nameTokens, zpNorm, gleicherKunde
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
