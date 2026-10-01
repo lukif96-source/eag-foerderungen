@@ -1,5 +1,5 @@
 // deno test supabase/functions/oemag/webhook.pruefung.ts  (kein *_test-Name: sonst greift node --test zu)
-import { secretGueltig, webhookEcht } from './webhook.ts';
+import { secretBefund, secretGueltig, webhookEcht } from './webhook.ts';
 
 const geheim = 'whsec_' + btoa('ein-test-geheimnis-32-zeichen-lang!!');
 async function signiere(id: string, ts: string, body: string) {
@@ -30,9 +30,21 @@ Deno.test('veränderter Inhalt, falsches Geheimnis, alter Zeitstempel → abgele
 Deno.test('falsch eingetragenes Secret: kein Absturz, sondern abgelehnt und erkannt', async () => {
   const sig = await signiere('msg_1', ts, body);
   const h = new Headers({ 'svix-id': 'msg_1', 'svix-timestamp': ts, 'svix-signature': sig });
-  for (const falsch of ['re_AbC123_xyz', 'whsec_nicht base64!', '"whsec_abc"']) {
+  for (const falsch of ['re_AbC123_xyz', 'whsec_nicht base64!', 'whsec_ab$c']) {
     if (await webhookEcht(falsch, h, body)) throw new Error('angenommen: ' + falsch);
     if (secretGueltig(falsch)) throw new Error('als gültig erkannt: ' + falsch);
   }
   if (!secretGueltig(geheim) || !secretGueltig(' ' + geheim + '\n')) throw new Error('echtes Secret nicht erkannt');
+});
+Deno.test('Kopierfehler im Secret werden ausgeglichen', async () => {
+  const sig = await signiere('msg_1', ts, body);
+  const h = new Headers({ 'svix-id': 'msg_1', 'svix-timestamp': ts, 'svix-signature': sig });
+  const b64 = geheim.slice(6);
+  const urlForm = 'whsec_' + b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  for (const v of ['"' + geheim + '"', 'RESEND_WEBHOOK_SECRET=' + geheim, geheim.slice(0, 12) + ' \n' + geheim.slice(12), urlForm, ' ' + geheim + ' ']) {
+    if (!secretGueltig(v)) throw new Error('nicht erkannt: ' + JSON.stringify(v));
+    if (!(await webhookEcht(v, h, body))) throw new Error('abgelehnt: ' + JSON.stringify(v));
+  }
+  const befund = secretBefund('re_123abc');
+  if (!befund.includes('API-Schlüssel') || befund.includes('123abc')) throw new Error('Befund: ' + befund);
 });
