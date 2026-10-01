@@ -20,13 +20,14 @@
   // warten = die Förderstelle ist dran
   // neu    = gab es in alten Datensätzen nicht – fehlt er, ist das keine Lücke
   const SCHRITTE = [
-    { key: 'daten', phase: 'vor', label: 'Daten erfasst', todo: 'Daten erfassen', knopf: 'Ergänzen', kurz: 'Daten', auto: true },
+    { key: 'daten', phase: 'vor', label: 'Name und Zählpunkt erfasst', todo: 'Name und Zählpunkt eintragen', knopf: 'Ergänzen', kurz: 'Daten', auto: true,
+      hilfe: 'Für das Ticket reichen Name und Einspeisezählpunkt – alles andere erst beim Antrag.' },
     { key: 'projekt', phase: 'vor', label: 'Projekt im EAG-Portal angelegt', todo: 'Projekt im EAG-Portal anlegen', knopf: 'Projekt angelegt', kurz: 'Projekt',
       hilfe: 'Geht schon vor dem Call und spart am Ticket-Tag Zeit.' },
     { key: 'ticket', phase: 'call', label: 'Ticket gezogen', todo: 'Ticket ziehen', knopf: 'Ticket gezogen', kurz: 'Ticket',
       hilfe: 'Nur am ersten Calltag ab 17:00 Uhr. Bei Kategorie A und B zählt die Sekunde.' },
     { key: 'eingereicht', phase: 'call', label: 'Antrag eingereicht', todo: 'Antrag im Portal einreichen', knopf: 'Eingereicht', kurz: 'Eingereicht',
-      hilfe: 'Bis zum letzten Calltag, sonst verfällt das Ticket.' },
+      hilfe: 'Jetzt im Portal alle Daten eintragen. Bis zum letzten Calltag, sonst verfällt das Ticket.' },
     { key: 'vertrag_erhalten', phase: 'zusage', label: 'Fördervertrag erhalten', todo: 'Fördervertrag abwarten', knopf: 'Vertrag erhalten', kurz: 'Vertrag da',
       warten: 'Warten auf Fördervertrag', hilfe: 'Mit Datum eintragen – ab da laufen die Fristen.' },
     { key: 'vertrag_versendet', phase: 'zusage', label: 'Vertrag an Kunden versendet', todo: 'Vertrag an Kunden versenden', knopf: 'Versendet', kurz: 'Vertrag versendet' },
@@ -55,6 +56,7 @@
     nachgereicht: 'Unterlagen nachgereicht',
     verlaengert_bis: 'Inbetriebnahme-Frist verlängert bis',
     frueher_abgelehnt: 'Früher abgelehnt im Call',
+    frueher_abgelehnt_am: 'Früher abgelehnt am',
     ticket_uhrzeit: 'Ticket gezogen um',
     zieher_geplant: 'Ticket-Zieher laut Würfel'
   };
@@ -92,10 +94,10 @@
   // ---------------------------------------------------------------
   // Pflichtdaten und Status
   // ---------------------------------------------------------------
-  const PFLICHT = [
-    ['kunde', 'Kunde'], ['strasse', 'Straße'], ['plz', 'PLZ'], ['ort', 'Ort'],
-    ['zaehlpunkt', 'Zählpunkt'], ['mail', 'Mail']
-  ];
+  // Für das Ticket sind nur Name und Einspeisezählpunkt Pflicht.
+  // Alles andere braucht erst der Antrag im Portal (Schritt „Antrag eingereicht“).
+  const PFLICHT = [['kunde', 'Kunde'], ['zaehlpunkt', 'Zählpunkt']];
+  const ANTRAG = [['strasse', 'Straße'], ['plz', 'PLZ'], ['ort', 'Ort'], ['mail', 'Mail']];
   const FELDER = [
     'jahr', 'programm', 'art', 'foerdercall', 'mitarbeiter', 'zieher', 'kunde', 'geburtsdatum', 'vollmacht',
     'strasse', 'plz', 'ort', 'kg_gst', 'zaehlpunkt', 'mail', 'projekt_nr', 'kwp', 'modulflaeche', 'einspeisung',
@@ -105,7 +107,15 @@
   function leer(v) { return v === null || v === undefined || (typeof v === 'string' && v.trim() === ''); }
 
   function fehlendeDaten(f) {
-    const fehlt = PFLICHT.filter(([k]) => leer(f[k])).map(([, l]) => l);
+    return PFLICHT.filter(([k]) => leer(f[k])).map(([, l]) => l);
+  }
+
+  // Was für den Antrag im Portal noch fehlt – ein Hinweis, keine Sperre.
+  // Nur solange der Antrag noch nicht eingereicht und die Förderung nicht beendet ist.
+  function antragDatenFehlen(f) {
+    const s = f.schritte || {};
+    if (!leer(s.eingereicht) || !leer(s.ausgezahlt) || ENDE.some(e => !leer(s[e.key]))) return [];
+    const fehlt = ANTRAG.filter(([k]) => leer(f[k])).map(([, l]) => l);
     const nurSpeicher = /^speicher$/i.test((f.art || '').trim());
     if (nurSpeicher) { if (leer(f.speicher)) fehlt.push('Speicher'); }
     else if (leer(f.kwp)) fehlt.push('kWp');
@@ -329,16 +339,51 @@
     });
   }
 
-  // Liefert die Änderung (patch) oder wirft, wenn kein Call mehr offen ist
+  // Liefert die Änderung (patch) oder wirft, wenn kein Call mehr offen ist.
+  // Merkt sich Call UND Ablehnungsdatum (frueher_abgelehnt / frueher_abgelehnt_am, gleiche Reihenfolge)
+  // und zieht das Jahr auf den neuen Call – sonst verschwindet die Förderung aus der Jahresansicht.
   function neuAnsuchen(f, heute) {
     const call = offenerCall(heute);
     if (!call) throw new Error('Kein Fördercall mehr offen – 2027 gibt es keinen.');
     const s = Object.assign({}, f.schritte || {});
-    const frueher = (s.frueher_abgelehnt || '').split(',').map(x => x.trim()).filter(Boolean);
-    if (istDatum(f.foerdercall) && f.foerdercall !== call && !frueher.includes(f.foerdercall)) frueher.push(f.foerdercall);
+    const liste = k => (s[k] || '').split(',').map(x => x.trim());
+    const calls = liste('frueher_abgelehnt').filter(Boolean);
+    const am = liste('frueher_abgelehnt_am').slice(0, calls.length);
+    while (am.length < calls.length) am.push('');
+    if (istDatum(f.foerdercall) && f.foerdercall !== call && !calls.includes(f.foerdercall)) {
+      calls.push(f.foerdercall);
+      am.push(istDatum(s.abgelehnt) ? s.abgelehnt : '');
+    }
     ['ticket', 'ticket_uhrzeit', 'zieher_geplant', 'eingereicht', 'abgelehnt', 'nachforderung', 'nachgereicht'].forEach(k => { delete s[k]; });
-    if (frueher.length) s.frueher_abgelehnt = frueher.join(', ');
-    return { foerdercall: call, ticket: '', schritte: s };
+    if (calls.length) {
+      s.frueher_abgelehnt = calls.join(', ');
+      if (am.some(Boolean)) s.frueher_abgelehnt_am = am.join(', '); else delete s.frueher_abgelehnt_am;
+    }
+    return { foerdercall: call, jahr: +call.slice(0, 4), ticket: '', schritte: s };
+  }
+
+  // Alle Ansuchen einer Förderung, ältestes zuerst: frühere (abgelehnt) und das aktuelle
+  function ansuchen(f, heute) {
+    const s = f.schritte || {};
+    const calls = (s.frueher_abgelehnt || '').split(',').map(x => x.trim()).filter(Boolean);
+    const am = (s.frueher_abgelehnt_am || '').split(',').map(x => x.trim());
+    const aus = calls.map((c, i) => ({ call: c, ergebnis: 'abgelehnt', datum: istDatum(am[i]) ? am[i] : null, aktuell: false }));
+    const st = status(f, heute);
+    const ergebnis = st.fertig ? 'ausgezahlt' : st.ende ? st.ende.key : 'laufend';
+    const datum = st.fertig ? s.ausgezahlt : st.ende ? s[st.ende.key] : null;
+    aus.push({ call: istDatum(f.foerdercall) ? f.foerdercall : null, ergebnis, datum: istDatum(datum) ? datum : null, aktuell: true });
+    return aus;
+  }
+
+  // Gehört die Förderung in die Jahresansicht? Eigenes Jahr, Call in diesem Jahr – und abgelehnte
+  // aus früheren Jahren, solange im laufenden Jahr noch neu angesucht werden kann.
+  function imJahr(f, jahr, heute) {
+    jahr = String(jahr || '');
+    if (!jahr) return true;
+    if (String(f.jahr) === jahr || String(f.foerdercall || '').startsWith(jahr)) return true;
+    heute = heute || heuteText();
+    const s = f.schritte || {};
+    return !leer(s.abgelehnt) && leer(s.ausgezahlt) && heute.startsWith(jahr) && !!offenerCall(heute);
   }
 
   // ---------------------------------------------------------------
@@ -446,7 +491,7 @@
 
   const API = {
     PHASEN, SCHRITTE, IDX, ENDE, NEBEN, CALLS, LETZTER_CALL, PFLICHT, FELDER, SAETZE_2026,
-    leer, istDatum, plusTage, plusMonate, heuteText, callEnde, fehlendeDaten, datenFehlen, schrittWert, status, aufgabe,
+    leer, istDatum, plusTage, plusMonate, heuteText, callEnde, fehlendeDaten, datenFehlen, antragDatenFehlen, ansuchen, imJahr, ANTRAG, schrittWert, status, aufgabe,
     inbetriebnahmeFrist, fristen, tracker, offenerCall, naechsterTicketTag, ticketTagPhase, ticketGezogen, gezogenVon, zieherVerteilen, neuAnsuchen, zpPruefung, kategorie, zuschuss,
     nameTokens, zpNorm, gleicherKunde, datumDE, exportZeile, csv, verpassteFristen
   };

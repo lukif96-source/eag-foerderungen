@@ -348,3 +348,39 @@ test('Überfällige Fristen für den Lauf: nur echte Daten in der Vergangenheit,
   assert.equal(v[0].frist.art, 'ticket');
   assert.ok(v[0].frist.tage < 0);
 });
+
+// ── Pflichtfelder und abgelehnte Förderungen ──────────────────────
+test('Für das Ticket reichen Name und Zählpunkt; der Rest ist Hinweis für den Antrag', () => {
+  const knapp = { kunde: 'Huber Sepp', zaehlpunkt: 'AT0030000000000000000000000000123', foerdercall: '2026-10-08', schritte: { projekt: '✓' } };
+  assert.deepEqual(A.fehlendeDaten(knapp), []);
+  assert.deepEqual(A.datenFehlen(knapp, '2026-10-01'), []);
+  assert.equal(A.aufgabe(knapp, A.status(knapp, '2026-10-01')).key, 'ticket');
+  assert.deepEqual(A.antragDatenFehlen(knapp), ['Straße', 'PLZ', 'Ort', 'Mail', 'kWp']);
+  assert.deepEqual(A.fehlendeDaten({ kunde: 'Huber Sepp', zaehlpunkt: '' }), ['Zählpunkt']);
+  // nach dem Einreichen kein Hinweis mehr
+  assert.deepEqual(A.antragDatenFehlen(Object.assign({}, knapp, { schritte: { eingereicht: '2026-10-09' } })), []);
+  // reiner Speicher braucht Speicher statt kWp
+  assert.ok(A.antragDatenFehlen({ art: 'Speicher', schritte: {} }).includes('Speicher'));
+});
+
+test('Neu ansuchen: Jahr folgt dem neuen Call, Ablehnungsdatum bleibt im Verlauf', () => {
+  const f = basis({ projekt: '✓', ticket: '2025-10-08', eingereicht: '2025-10-09', abgelehnt: '2025-12-02' }, { jahr: 2025, foerdercall: '2025-10-08' });
+  const p = A.neuAnsuchen(f, '2026-10-01');
+  assert.equal(p.foerdercall, '2026-10-08');
+  assert.equal(p.jahr, 2026);
+  assert.equal(p.schritte.frueher_abgelehnt, '2025-10-08');
+  assert.equal(p.schritte.frueher_abgelehnt_am, '2025-12-02');
+  const neu = Object.assign({}, f, p);
+  const v = A.ansuchen(neu, '2026-10-01');
+  assert.deepEqual(v.map(x => [x.call, x.ergebnis, x.datum]), [['2025-10-08', 'abgelehnt', '2025-12-02'], ['2026-10-08', 'laufend', null]]);
+});
+
+test('Jahresansicht zeigt abgelehnte aus Vorjahren, solange noch angesucht werden kann', () => {
+  const alt = basis({ projekt: '✓', abgelehnt: '2025-12-02' }, { jahr: 2025, foerdercall: '2025-10-08' });
+  assert.equal(A.imJahr(alt, '2026', '2026-10-01'), true);      // Call 08.10. offen
+  assert.equal(A.imJahr(alt, '2026', '2026-10-23'), false);     // kein Call mehr
+  assert.equal(A.imJahr(alt, '2025', '2026-10-01'), true);
+  const umgezogen = basis({ projekt: '✓' }, { jahr: 2025, foerdercall: '2026-10-08' });   // alter Datensatz ohne Jahr-Umzug
+  assert.equal(A.imJahr(umgezogen, '2026', '2026-10-01'), true);
+  assert.equal(A.imJahr(basis({}, { jahr: 2025, foerdercall: '2025-06-16' }), '2026', '2026-10-01'), false);
+});

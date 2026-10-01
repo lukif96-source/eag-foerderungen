@@ -674,3 +674,16 @@ body.demo .kopf::after { content: "Demo – keine echten Daten"; position: absol
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* Akte: alle Ansuchen einer Förderung (frühere Ablehnungen + aktuelles) */
+.ansuchen { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--fl-2); display: grid; gap: 4px; }
+.ansuchen-titel { font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 2px; }
+.ansuchen-zeile > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ansuchen-zeile b { justify-self: end; }
+.ansuchen-zeile { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 12.5px; color: var(--mute); font-variant-numeric: tabular-nums; }
+.ansuchen-nr { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line-3); display: grid; place-items: center; font-size: 10.5px; font-weight: 600; }
+.ansuchen-zeile b { font-weight: 500; color: var(--ink-2); }
+.a-abgelehnt b, .a-erloschen b { color: var(--krit); }
+.a-abgelehnt .ansuchen-nr { border-color: var(--krit-line); color: var(--krit); }
+.a-ausgezahlt b { color: var(--ok); }
+.a-laufend b { color: var(--ink); }

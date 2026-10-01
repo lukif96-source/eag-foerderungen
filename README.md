@@ -22,7 +22,7 @@ Danach: anmelden → **Excel-Import** → bisherige Liste auswählen.
 
 | Phase | Schritte | Frist |
 |---|---|---|
-| Vorbereitung | Daten erfasst · Projekt im EAG-Portal angelegt | – |
+| Vorbereitung | Name und Zählpunkt erfasst · Projekt im EAG-Portal angelegt | – |
 | Call | Ticket gezogen · Antrag eingereicht | Ticket nur am 1. Calltag ab 17:00 · Antrag bis Callende |
 | Zusage | Fördervertrag erhalten (**mit Datum**) · Vertrag an Kunden versendet | Nachforderung: 4 Wochen |
 | Umsetzung | In Betrieb genommen (Fertigstellungsmeldung) · Bei der E-Control registriert | 6 Monate ab Vertrag, über 100 kWp 12 |
@@ -32,6 +32,13 @@ Nebenschritte: Nachforderung / nachgereicht, Frist verlängert bis. Ende ohne Au
 zurückgezogen, Zusage erloschen. **Abgelehnt → „Neu ansuchen“** setzt Ticket und Einreichung zurück,
 behält das Portal-Projekt und merkt sich den alten Call – solange noch ein Call offen ist.
 Laut SOLPRO ist der Call vom 8.–22.10.2026 der letzte; 2027 gibt es keinen.
+Abgelehnte sind sichtbar, solange noch angesucht werden kann: oben der Alarm „abgelehnt – neu ansuchen bis …“
+(führt zur Ansicht Beendet), auch aus Vorjahren in der aktuellen Jahresansicht. „Neu ansuchen“ zieht das Jahr auf den
+neuen Call und merkt sich Call **und** Ablehnungsdatum; die Zeile zeigt „2. Versuch · zuvor abgelehnt …“, die Akte oben
+im Ablauf alle Ansuchen.
+
+**Pflichtfelder:** Für das Ticket nur **Name und Einspeisezählpunkt**. Straße, PLZ, Ort, Mail und kWp braucht erst der
+Antrag im Portal – fehlen sie, steht beim Schritt „Antrag einreichen“ ein Hinweis (keine Sperre).
 
 **Status-Tracker** oben in jeder Akte: je Phase ein Abschnitt, je Schritt ein Strich (grün = erledigt,
 Rahmen = jetzt dran, schraffiert = Förderstelle ist dran, rot = übersprungen), darunter der nächste Schritt,

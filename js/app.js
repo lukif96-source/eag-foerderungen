@@ -13,6 +13,7 @@
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
   const esc = s => String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const heute = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const kurzDatum = v => { const t = datumDE(v); return t.length === 10 ? t.slice(0, 6) + t.slice(8) : t; };   // 16.06.26
   const uhrJetzt = () => new Date().toTimeString().slice(0, 8);
   const datumDE = v => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v || ''); return m ? `${m[3]}.${m[2]}.${m[1]}` : (v || ''); };
   const zahlDE = v => (v === null || v === undefined || v === '') ? '' : Number(v).toLocaleString('de-AT', { maximumFractionDigits: 2 });
@@ -253,7 +254,7 @@
   function passtBasis(d) {
     const f = S.filter;
     if (!!d.geloescht_am !== f.papierkorb) return false;
-    if (f.jahr && String(d.jahr) !== f.jahr) return false;
+    if (f.jahr && !E.imJahr(d, f.jahr, heute())) return false;
     if (f.call && (f.call === 'ohne' ? !!d.foerdercall : d.foerdercall !== f.call)) return false;
     if (f.art && d.art !== f.art) return false;
     if (f.mitarbeiter && (d.mitarbeiter || '').trim() !== f.mitarbeiter) return false;
@@ -305,6 +306,7 @@
     if (S.extra === 'frist') return fristBald(x);
     if (S.extra === 'offen') return hatOffenePunkte(x);
     if (S.extra === 'datenfehlen') return fehltDaten(x);
+    if (S.extra === 'abgelehnt') return !!(x.st.ende && x.st.ende.key === 'abgelehnt');
     return true;
   }
 
@@ -342,12 +344,13 @@
     const n = { todo: 0, warten: 0, fertig: 0, beendet: 0, alle: basis.length };
     basis.forEach(x => { n[kategorie(x.st, x.d)]++; });
     const offen = basis.filter(x => !x.st.ende && !x.st.fertig);
-    const alarm = { frist: offen.filter(fristBald).length, offen: offen.filter(hatOffenePunkte).length, datenfehlen: offen.filter(fehltDaten).length };
+    const alarm = { frist: offen.filter(fristBald).length, offen: offen.filter(hatOffenePunkte).length, datenfehlen: offen.filter(fehltDaten).length,
+      abgelehnt: E.offenerCall(heute()) ? basis.filter(x => x.st.ende && x.st.ende.key === 'abgelehnt').length : 0 };
     const kritisch = offen.some(x => { const fr = E.fristen(x.d, heute())[0]; return fr && fr.stufe === 'ueberfaellig'; });
     const seg = (k, t) => `<button class="seg-knopf ${S.ansicht === k ? 'aktiv' : ''}" data-ansicht="${k}">${t}<span>${n[k]}</span></button>`;
     const chip = (k, icon, t, laut) => alarm[k] ? `<button class="alarm alarm-${k} ${laut ? 'laut' : ''} ${S.extra === k ? 'aktiv' : ''}" data-extra="${k}" title="${esc(t)}"><svg><use href="#${icon}"/></svg><b>${alarm[k]}</b><span>${t}</span></button>` : '';
     $('#reiter').innerHTML = `<div class="seg">${seg('todo', 'Zu tun')}${seg('warten', 'Wartet')}${seg('fertig', 'Fertig')}${seg('beendet', 'Beendet')}${seg('alle', 'Alle')}</div>
-      <div class="alarme">${chip('frist', 'i-history', 'Fristen', kritisch)}${chip('offen', 'i-flag', 'Offene Punkte')}${chip('datenfehlen', 'i-alert', 'Daten fehlen', true)}</div>`;
+      <div class="alarme">${chip('frist', 'i-history', 'Fristen', kritisch)}${chip('offen', 'i-flag', 'Offene Punkte')}${chip('datenfehlen', 'i-alert', 'Daten fehlen', true)}${chip('abgelehnt', 'i-restore', `abgelehnt – neu ansuchen bis ${datumDE(E.callEnde(E.offenerCall(heute()) || '') || '').slice(0, 6)}`, true)}</div>`;
   }
 
   // Phasen-Balken: 5 Phasen mit Anzahl, Klick filtert
@@ -375,7 +378,8 @@
     const fr = E.fristen(d, heute())[0];
     const s = d.schritte || {};
     const meta = [[d.plz, d.ort].filter(Boolean).join(' '), d.foerdercall ? 'Call ' + datumDE(d.foerdercall).slice(0, 6) + d.foerdercall.slice(2, 4) : '',
-      d.kwp ? zahlDE(d.kwp) + ' kWp' : '', d.zieher || ''].filter(Boolean);
+      d.kwp ? zahlDE(d.kwp) + ' kWp' : '', d.zieher || '',
+      st.ende && E.istDatum(s[st.ende.key]) ? `${st.ende.label.split(' /')[0].toLowerCase()} am ${datumDE(s[st.ende.key])}` : ''].filter(Boolean);
     let knopf = '';
     if (st.fertig) {
       knopf = `<span class="z-status ok"><svg><use href="#i-check"/></svg>${s.ausgezahlt && s.ausgezahlt !== '✓' ? datumDE(s.ausgezahlt) : 'ausgezahlt'}</span>`;
@@ -390,7 +394,8 @@
       knopf = `<button class="z-knopf leise" data-oeffnen>${esc(n.knopf)}</button>`;
     }
     const flags = [
-      s.frueher_abgelehnt ? `<span class="z-tag" title="Abgelehnt im Call ${esc(callsText(s.frueher_abgelehnt))}">2. Versuch</span>` : '',
+      s.frueher_abgelehnt ? `<span class="z-tag" title="Abgelehnt im Call ${esc(callsText(s.frueher_abgelehnt))}">${s.frueher_abgelehnt.split(',').length + 1}. Versuch · zuvor abgelehnt ${esc(callsText(s.frueher_abgelehnt))}</span>` : '',
+      n && n.key === 'eingereicht' && E.antragDatenFehlen(d).length ? `<span class="z-icon gelb" title="Für den Antrag fehlen: ${esc(E.antragDatenFehlen(d).join(', '))}"><svg><use href="#i-alert"/></svg></span>` : '',
       (d.offene_punkte || '').trim() ? `<span class="z-icon gelb" title="${esc(d.offene_punkte)}"><svg><use href="#i-flag"/></svg></span>` : '',
       fehlt.length ? `<span class="z-icon rot" title="Es fehlen: ${esc(fehlt.join(', '))}"><svg><use href="#i-alert"/></svg></span>` : ''
     ].join('');
@@ -417,7 +422,8 @@
       gruppen.get(key).push(x);
     });
     const defs = S.ansicht === 'fertig' ? [{ key: 'fertig', todo: 'Ausgezahlt', phase: 'fertig' }]
-      : S.ansicht === 'beendet' ? E.ENDE.map(e => ({ key: e.key, todo: e.label, phase: 'ende' }))
+      : S.ansicht === 'beendet' ? E.ENDE.map(e => ({ key: e.key, todo: e.label, phase: 'ende',
+          hilfe: e.key === 'abgelehnt' && E.offenerCall(heute()) ? `Neu ansuchen geht im Call ab ${datumDE(E.offenerCall(heute()))} bis ${datumDE(E.callEnde(E.offenerCall(heute())))}${E.offenerCall(heute()) === E.LETZTER_CALL ? ' – dem letzten' : ''}.` : '' }))
       : GRUPPEN;
     const RANG = { ueberfaellig: 0, dringend: 1, bald: 2, ruhig: 3, unbekannt: 4 };
     const dringlich = x => { const fr = E.fristen(x.d, heute())[0]; return fr ? RANG[fr.stufe] + (fr.datum || '') : '9'; };
@@ -769,8 +775,12 @@
     });
     const ende = nurLesen ? '' : `<div class="ergebnis"><span class="grau klein">Endet ohne Auszahlung?</span><div class="ergebnis-knoepfe">${E.ENDE.map(e =>
       `<button type="button" class="btn btn-mini-leise ${s[e.key] ? 'aktiv' : ''}" data-ende="${e.key}">${s[e.key] ? '✓ ' : ''}${esc(e.label)}</button>`).join('')}</div></div>`;
-    const frueher = s.frueher_abgelehnt ? `<p class="klein grau">Abgelehnt im Call ${esc(callsText(s.frueher_abgelehnt))}, danach neu angesucht.</p>` : '';
-    return fristenHtml(rec) + html + '</ol></details>' + frueher + ende;
+    const verlauf = E.ansuchen(rec, heute());
+    const ERG = { abgelehnt: 'abgelehnt', zurueckgezogen: 'zurückgezogen', erloschen: 'Zusage erloschen', ausgezahlt: 'ausgezahlt', laufend: 'läuft' };
+    const frueher = verlauf.length > 1 || (verlauf[0] && verlauf[0].ergebnis === 'abgelehnt') ? `<div class="ansuchen"><div class="ansuchen-titel">Ansuchen</div>${verlauf.map((a, i) =>
+      `<div class="ansuchen-zeile a-${a.ergebnis}"><span class="ansuchen-nr">${i + 1}</span><span>Call ${a.call ? kurzDatum(a.call) : '–'}</span>
+        <b>${esc(ERG[a.ergebnis] || a.ergebnis)}${a.datum ? ' ' + kurzDatum(a.datum) : ''}</b></div>`).join('')}</div>` : '';
+    return fristenHtml(rec) + frueher + html + '</ol></details>' + ende;
   }
 
   function jetztHtml(rec, nurLesen, neu) {
@@ -805,7 +815,9 @@
     }
     const n = E.aufgabe(rec, st);
     const fr = t.frist;
-    const hinweis = n.key === 'daten' ? 'Unten die fehlenden Angaben ergänzen: ' + E.datenFehlen(rec, heute()).join(', ') : (n.hilfe || '');
+    const antragFehlt = n.key === 'eingereicht' ? E.antragDatenFehlen(rec) : [];
+    const hinweis = n.key === 'daten' ? 'Für das Ticket fehlt: ' + E.datenFehlen(rec, heute()).join(', ')
+      : antragFehlt.length ? 'Für den Antrag im Portal noch ergänzen: ' + antragFehlt.join(', ') : (n.hilfe || '');
     const wer = t.aktion.wer === 'foerderstelle' ? 'Förderstelle ist dran' : 'Wir sind dran';
     return `<div class="jetzt ${t.ton === 'alarm' ? 'jetzt-dringend' : ''}">${leiste}<div class="jetzt-text"><small>Als Nächstes · ${n.neben ? 'Nebenschritt' : `Schritt ${t.nummer} von ${t.gesamt}`} · ${wer}</small><b>${esc(n.todo)}</b>${n.warten ? '<span>Wartet auf die Förderstelle – abhaken, sobald es da ist.</span>' : ''}${hinweis ? `<span>${esc(hinweis)}</span>` : ''}${fr ? `<span class="jetzt-frist">${fristBadge(fr, true)}</span>` : ''}</div>
       ${!nurLesen && !n.auto ? `<button class="erledigt erledigt-gross" data-jetzt="${n.key}"><svg><use href="#i-check"/></svg>${esc(n.knopf)} – speichern</button>` : ''}</div>`;
@@ -1530,7 +1542,11 @@ Vortag: ${esc(a.vorher_sha256 || '–')}">${esc(kurzHash(a.sha256))}</td>
     });
     $('#reiter').addEventListener('click', e => {
       const x = e.target.closest('[data-extra]');
-      if (x) { S.extra = S.extra === x.dataset.extra ? '' : x.dataset.extra; S.aufgeklappt.clear(); zeichne(); return; }
+      if (x) {
+        S.extra = S.extra === x.dataset.extra ? '' : x.dataset.extra;
+        if (S.extra === 'abgelehnt') S.ansicht = 'beendet';
+        S.aufgeklappt.clear(); zeichne(); return;
+      }
       const b = e.target.closest('[data-ansicht]');
       if (!b) return;
       S.ansicht = b.dataset.ansicht; S.aufgeklappt.clear();
