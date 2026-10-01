@@ -1,10 +1,13 @@
 // OeMAG-Mails automatisch auslesen.
 //
-// Zwei Wege hinein – derselbe Ablauf danach (lesen → zuordnen → übernehmen, js/oemag.js):
-//   1. Abholen (Cron alle 10 Minuten, Body {"abholen": true}): neue Mails aus dem Postfach über Microsoft Graph.
+// Drei Wege hinein – derselbe Ablauf danach (lesen → zuordnen → übernehmen, js/oemag.js):
+//   1. Resend (empfohlen bei Weiterleitung): Outlook leitet an <alias>@<id>.resend.app weiter, Resend ruft diese
+//      Funktion mit dem Ereignis „email.received“ auf; der Mailtext wird mit RESEND_API_KEY abgeholt
+//      (GET /emails/receiving/{id}). Echtheit: Signatur mit RESEND_WEBHOOK_SECRET (whsec_…) oder ?schluessel=.
+//   2. Abholen (Cron alle 10 Minuten, Body {"abholen": true}): neue Mails aus dem Postfach über Microsoft Graph.
 //      Nur Leserecht (Mail.Read), es wird nichts verschoben oder als gelesen markiert.
 //      Secrets: MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET, OEMAG_POSTFACH (z. B. oemag@solpro.at)
-//   2. Eingang (POST mit einer Mail): für Weiterleitungsdienste (Postmark Inbound) oder Power Automate.
+//   3. Eingang (POST mit einer Mail): andere Weiterleitungsdienste (Postmark Inbound) oder Power Automate.
 //      Header x-oemag-schluessel bzw. ?schluessel= muss OEMAG_SCHLUESSEL entsprechen.
 //      Body: { betreff, text | html, von, datum, message_id }  oder Postmark-Format (Subject, TextBody, …)
 // Optional: OEMAG_ABSENDER = Absender-Domains, mit Komma (Standard: oemag.at,eag-abwicklungsstelle.at)
@@ -16,6 +19,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import './ablauf.js';
 import './oemag.js';
+import { webhookEcht } from './webhook.ts';
 
 // deno-lint-ignore no-explicit-any
 const O = (globalThis as any).EAG_OEMAG;
@@ -83,14 +87,35 @@ function eingangMail(b: any): Mail {
   };
 }
 
+// Resend: Mailinhalt zum Ereignis abholen
+async function resendMail(emailId: string): Promise<Mail> {
+  const r = await fetch(`https://api.resend.com/emails/receiving/${encodeURIComponent(emailId)}`, {
+    headers: { Authorization: `Bearer ${env('RESEND_API_KEY')}` },
+  });
+  if (r.status === 401 || r.status === 403) throw new Error('Resend lehnt den Abruf ab – RESEND_API_KEY braucht „Full access“ (nicht nur Senden)');
+  if (!r.ok) throw new Error(`Resend: Mail ${emailId} nicht abrufbar (${r.status}) ${(await r.text()).slice(0, 200)}`);
+  const m = await r.json();
+  return { message_id: m.message_id || 'resend:' + m.id, betreff: m.subject || '', text: m.text || '', html: m.html || '',
+    von: m.from || '', datum: m.created_at || new Date().toISOString(), quelle: 'eingang' };
+}
+
 Deno.serve(async (req) => {
   const sb = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'));
+  const roh = await req.text();
   // deno-lint-ignore no-explicit-any
   let body: any = {};
-  try { body = await req.json(); } catch { /* leer */ }
+  try { body = JSON.parse(roh || '{}'); } catch { /* leer */ }
+  const schluessel = req.headers.get('x-oemag-schluessel') || new URL(req.url).searchParams.get('schluessel') || '';
+  const schluesselOk = !!env('OEMAG_SCHLUESSEL') && schluessel === env('OEMAG_SCHLUESSEL');
 
   let mails: Mail[];
-  if (body.abholen) {
+  if (body.type === 'email.received') {
+    // Resend: Signatur prüfen (oder Schlüssel in der Adresse), dann Inhalt holen
+    const echt = env('RESEND_WEBHOOK_SECRET') ? await webhookEcht(env('RESEND_WEBHOOK_SECRET'), req.headers, roh) : schluesselOk;
+    if (!echt) return json({ fehler: 'Webhook nicht echt (Signatur bzw. Schlüssel)' }, 401);
+    try { mails = [await resendMail(body.data?.email_id)]; }
+    catch (e) { return json({ fehler: (e as Error).message }, 502); }
+  } else if (body.abholen) {
     if (!env('MS_CLIENT_ID')) return json({ abgeholt: 0, hinweis: 'Microsoft-Zugang noch nicht eingerichtet – siehe docs/OEMAG-MAILS.md' });
     // ab der letzten verarbeiteten Mail (1 Tag Überlappung), höchstens 30 Tage zurück
     const { data: letzte } = await sb.from('foerder_posteingang').select('empfangen_am').eq('quelle', 'postfach')
@@ -99,8 +124,7 @@ Deno.serve(async (req) => {
     try { mails = await graphMails(new Date(ab).toISOString().replace(/\.\d{3}Z$/, 'Z')); }
     catch (e) { return json({ fehler: (e as Error).message }, 502); }
   } else {
-    const schluessel = req.headers.get('x-oemag-schluessel') || new URL(req.url).searchParams.get('schluessel') || '';
-    if (!env('OEMAG_SCHLUESSEL') || schluessel !== env('OEMAG_SCHLUESSEL')) return json({ fehler: 'Schlüssel fehlt oder falsch' }, 401);
+    if (!schluesselOk) return json({ fehler: 'Schlüssel fehlt oder falsch' }, 401);
     mails = [eingangMail(body)];
   }
 

@@ -171,3 +171,34 @@ test('Widerspruch Ticketnummer: nicht überschreiben, aber zur Prüfung vorlegen
   assert.equal(r.status, 'vorschlag');
   assert.ok(r.notizen[0].startsWith('⚠ Ticketnummer: in der App a91f3c, laut Mail 4b7e21'));
 });
+
+test('Weitergeleitet (Outlook, deutsch): Datum der Originalmail, Inhalt wird erkannt', () => {
+  const wg = { betreff: 'WG: Nachforderung von Unterlagen', datum: '2026-08-20T09:00:00Z',
+    text: `________________________________
+Von: EAG Abwicklungsstelle <noreply@oemag.at>
+Gesendet: Montag, 3. August 2026 08:12
+An: oemag@solpro.at
+Betreff: Nachforderung von Unterlagen
+
+` + NACHFORDERUNG.text.replace('bis spätestens 31.08.2026', '') };     // diesmal ohne Frist im Text
+  const e = O.lesen(wg);
+  assert.equal(e.art, 'nachforderung_abrechnung');
+  assert.equal(e.datum, '2026-08-03');                     // nicht der Weiterleitungstag 20.08.
+  const r = O.verarbeiten(wg, liste());
+  assert.equal(r.automatisch.schritte.nachforderung_abrechnung, '2026-08-03');
+});
+
+test('Datum der Originalmail: verschiedene Kopfzeilen', () => {
+  assert.equal(O.originalDatum('Sent: Monday, August 3, 2026 8:12 AM'), '2026-08-03');
+  assert.equal(O.originalDatum('Datum: 03.08.2026 08:12'), '2026-08-03');
+  assert.equal(O.originalDatum('> Gesendet: Mittwoch, 16. Juni 2026 17:05'), '2026-06-16');
+  assert.equal(O.originalDatum('Gesendet: Montag, 2. März 2026 09:00'), '2026-03-02');
+  assert.equal(O.originalDatum('Kein Kopf hier'), null);
+});
+
+test('Weitergeleitete Ticket-Mail: Ticketdatum aus dem Text bleibt maßgeblich', () => {
+  const wg = { betreff: 'WG: Ticketziehung', datum: '2026-06-17T08:00:00Z', text: 'Von: noreply@oemag.at\nGesendet: Dienstag, 16. Juni 2026 17:05\n\n' + TICKET.text };
+  const e = O.lesen(wg);
+  assert.equal(e.datum, '2026-06-16');
+  assert.equal(e.uhrzeit, '17:04:35');
+});

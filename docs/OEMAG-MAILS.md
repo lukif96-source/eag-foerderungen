@@ -31,10 +31,44 @@ auch **von Hand einfügen** – das funktioniert sofort, ohne die Einrichtung un
 Inhalt von [`sql/oemag.sql`](../sql/oemag.sql) ausführen. Danach gibt es das Feld „EAG-Nr.“ in der Akte und
 den Posteingang. Ab hier funktioniert **„Mail einfügen“**.
 
-### 2. Microsoft 365: Zugriff auf das Postfach (einmalig, M365-Admin)
+### 2. Funktion bereitstellen (Supabase → Edge Functions)
 
-Die Funktion holt die Mails **selbst** ab – nichts weiterleiten (M365 sperrt automatisches Weiterleiten nach
-außen ohnehin meist). Sie bekommt **nur Leserecht** und **nur auf dieses eine Postfach**.
+*Deploy a new function* → *Via Editor*, Name **`oemag`**, vier Dateien aus
+[`supabase/functions/oemag/`](../supabase/functions/oemag/): `index.ts`, `webhook.ts`, `ablauf.js`, `oemag.js`.
+Danach **„Verify JWT“ ausschalten** (Resend und der Zeitplan rufen ohne Supabase-Login auf; die Funktion prüft
+selbst die Signatur bzw. den Schlüssel).
+
+### 3. Weiterleiten über Resend (empfohlen – das Konto gibt es schon für die Registrierungs-Mail)
+
+1. **Resend** → *Receiving* (Empfangen): Die Empfangsadresse des Teams notieren, z. B.
+   `oemag@<id>.resend.app` (der Teil vor dem @ ist frei wählbar).
+2. **Resend** → *Webhooks* → *Add Webhook*
+   - URL: `https://iuxklqcpexoziqxrohwa.supabase.co/functions/v1/oemag`
+   - Ereignis: **`email.received`**
+   - Danach das **Signing Secret** (`whsec_…`) kopieren.
+3. **Supabase** → *Edge Functions* → *Secrets*:
+   - `RESEND_WEBHOOK_SECRET` = das Signing Secret
+   - `RESEND_API_KEY` ist schon da. Er muss **„Full access“** haben (ein reiner Sende-Schlüssel darf empfangene
+     Mails nicht lesen). Meldet die Funktion „braucht Full access“: in Resend einen neuen Schlüssel mit
+     Vollzugriff anlegen und hier ersetzen.
+4. **Outlook** (Postfach `oemag@solpro.at`) → *Regeln* → neue Regel:
+   „Wenn Nachricht eingeht von … OeMAG/EAG-Abwicklungsstelle“ (oder einfach alle Nachrichten) →
+   **„Umleiten an“** die Resend-Adresse. *Umleiten* behält Absender und Datum der Originalmail; *Weiterleiten*
+   geht auch – das Originaldatum wird dann aus dem Kopf der weitergeleiteten Mail gelesen.
+5. **Testen:** eine OeMAG-Mail an die Resend-Adresse weiterleiten → in der App ☰ → *OeMAG-Posteingang*.
+   Kommt eine Unzustellbarkeitsmeldung **„550 5.7.520 … does not allow external forwarding“**: Microsoft 365
+   sperrt Weiterleiten nach außen. Der Admin erlaubt es nur für dieses Postfach:
+   *Microsoft Defender* → *Richtlinien und Regeln* → *Bedrohungsrichtlinien* → *Antispam* →
+   *Richtlinie für ausgehenden Spam erstellen* → gilt für `oemag@solpro.at` → *Regeln für automatische
+   Weiterleitung*: **Ein**.
+
+Datenschutz: Die Mails laufen dann über Resend (wie heute schon die Registrierungs-Mails). Kosten und Grenzen
+für empfangene Mails: im Resend-Tarif prüfen – am Ticket-Tag können es über 100 Mails sein.
+
+### Alternative A: direkt aus dem Postfach lesen (ohne Weiterleitung, einmalig M365-Admin)
+
+Die Funktion holt die Mails selbst ab (alle 10 Minuten, Zeitplan aus `sql/oemag.sql`) – kein Dritter dazwischen,
+keine Weiterleitungs-Freigabe nötig. Sie bekommt **nur Leserecht** und **nur auf dieses eine Postfach**.
 
 1. **Entra ID** (portal.azure.com) → *App-Registrierungen* → *Neue Registrierung*
    Name: `EAG-Förderungen OeMAG`, nur dieses Verzeichnis, keine Umleitungs-URI.
@@ -49,41 +83,16 @@ außen ohnehin meist). Sie bekommt **nur Leserecht** und **nur auf dieses eine P
    Test-ApplicationAccessPolicy -Identity oemag@solpro.at -AppId <Anwendungs-ID>   # → Granted
    Test-ApplicationAccessPolicy -Identity irgendwer@solpro.at -AppId <Anwendungs-ID> # → Denied
    ```
-   (`oemag@solpro.at` muss dafür ein Postfach oder eine E-Mail-aktivierte Sicherheitsgruppe sein.)
-5. Notieren: **Verzeichnis-ID** (Tenant), **Anwendungs-ID** (Client), **Geheimnis**.
+5. Secrets in Supabase: `MS_TENANT_ID` (Verzeichnis-ID), `MS_CLIENT_ID` (Anwendungs-ID),
+   `MS_CLIENT_SECRET`, `OEMAG_POSTFACH` = `oemag@solpro.at`, optional `OEMAG_ABSENDER` (Absender-Domains, mit Komma;
+   Standard `oemag.at,eag-abwicklungsstelle.at` – **an einer echten Mail prüfen**, sonst wird übersprungen).
+6. Testen: *Edge Functions* → `oemag` → *Test* mit Body `{"abholen": true}`.
 
-### 3. Supabase: Secrets und Funktion
+### Alternative B: anderer Weiterleitungsdienst (z. B. Postmark Inbound)
 
-*Edge Functions* → *Secrets*:
-
-| Name | Wert |
-|---|---|
-| `MS_TENANT_ID` | Verzeichnis-ID |
-| `MS_CLIENT_ID` | Anwendungs-ID |
-| `MS_CLIENT_SECRET` | Geheimnis |
-| `OEMAG_POSTFACH` | `oemag@solpro.at` |
-| `OEMAG_ABSENDER` | optional: Absender-Domains, mit Komma. Standard `oemag.at,eag-abwicklungsstelle.at` – **bitte an einer echten Mail prüfen** (Absender im Mailkopf), sonst werden die Mails übersprungen |
-
-*Edge Functions* → *Deploy a new function* → *Via Editor*, Name **`oemag`**, drei Dateien:
-`index.ts` aus [`supabase/functions/oemag/index.ts`](../supabase/functions/oemag/index.ts),
-`ablauf.js` und `oemag.js` aus [`js/`](../js/). Danach **„Verify JWT“ ausschalten** (der Cron ruft ohne Login).
-
-Der Zeitplan (alle 10 Minuten) kommt aus `sql/oemag.sql`. Testen: *Edge Functions* → `oemag` → *Test* mit Body
-`{"abholen": true}` – die Antwort zählt gelesene, übernommene und zu prüfende Mails.
-
-### Alternative: automatisch weiterleiten
-
-Geht auch – ist bei Microsoft 365 aber **nicht einfacher**:
-1. M365 sperrt automatisches Weiterleiten nach außen standardmäßig. Der Admin muss es für `oemag@solpro.at`
-   erlauben (*Microsoft Defender* → *Richtlinien* → *Antispam* → *Richtlinie für ausgehenden Spam* →
-   eigene Richtlinie nur für dieses Postfach, „Automatische Weiterleitung: Ein“).
-2. Es braucht einen Eingangsdienst, der aus der Mail einen Webhook macht (z. B. Postmark Inbound). Dort laufen
-   dann Kundendaten durch → Vertrag zur Auftragsverarbeitung; am Ticket-Tag können es über 100 Mails sein.
-3. Outlook-Regel auf `oemag@solpro.at`: alles von der OeMAG an die Eingangsadresse des Dienstes weiterleiten.
-
-Beim Dienst als Webhook eintragen:
-Secret `OEMAG_SCHLUESSEL` (beliebiges langes Passwort) setzen und als Webhook-Adresse
-`https://iuxklqcpexoziqxrohwa.supabase.co/functions/v1/oemag?schluessel=<OEMAG_SCHLUESSEL>` eintragen.
+Secret `OEMAG_SCHLUESSEL` (langes Zufallspasswort) setzen und beim Dienst als Webhook eintragen:
+`https://iuxklqcpexoziqxrohwa.supabase.co/functions/v1/oemag?schluessel=<OEMAG_SCHLUESSEL>`
+(Postmark verarbeitet eingehende Mails laut Preisliste erst in den bezahlten Tarifen.)
 
 ---
 

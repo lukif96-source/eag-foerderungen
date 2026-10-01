@@ -32,7 +32,7 @@
   ];
   const ART = Object.fromEntries(ARTEN.map(a => [a.art, a]));
 
-  const pad = n => String(n).padStart(2, '0');
+  const pad = n => String(n).padStart(2, '0');   // für isoDatum
   const isoDatum = (d, m, y) => `${y.length === 2 ? '20' + y : y}-${pad(m)}-${pad(d)}`;
 
   // Mailtext ohne HTML; Kennungen werden auch gefunden, wenn sie mit Leerzeichen geschrieben sind
@@ -43,6 +43,24 @@
   }
   // Leerzeichen zwischen Ziffern/Großbuchstaben entfernen: „AT003000 00000 … 20285“ → „AT003000…20285“
   const kompakt = t => String(t).replace(/([0-9A-Z])[  ]+(?=[0-9A-Z])/g, '$1');
+
+  // Weitergeleitete Mail: Datum der Originalmail aus dem Kopfblock („Gesendet: Montag, 3. August 2026 08:12“,
+  // „Sent: Monday, August 3, 2026 8:12 AM“, „Datum: 03.08.2026 08:12“). Sonst null.
+  const MONAT = { jänner: 1, januar: 1, january: 1, jan: 1, februar: 2, february: 2, feb: 2, märz: 3, maerz: 3, march: 3, mär: 3, mar: 3,
+    april: 4, apr: 4, mai: 5, may: 5, juni: 6, june: 6, jun: 6, juli: 7, july: 7, jul: 7, august: 8, aug: 8, september: 9, sep: 9, sept: 9,
+    oktober: 10, october: 10, okt: 10, oct: 10, november: 11, nov: 11, dezember: 12, december: 12, dez: 12, dec: 12 };
+  function originalDatum(text) {
+    const kopf = String(text).match(/^[ \t>]*(?:Gesendet|Sent|Datum|Date)\s*:\s*(.+)$/im);
+    if (!kopf) return null;
+    const z = kopf[1];
+    let m = z.match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})/);
+    if (m) return isoDatum(m[1], m[2], m[3]);
+    m = z.match(/(\d{1,2})\.?\s+([A-Za-zÄÖÜäöü]+)\.?\s+(\d{4})/);                       // 3. August 2026
+    if (m && MONAT[m[2].toLowerCase()]) return isoDatum(m[1], MONAT[m[2].toLowerCase()], m[3]);
+    m = z.match(/([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})/);                                  // August 3, 2026
+    if (m && MONAT[m[1].toLowerCase()]) return isoDatum(m[2], MONAT[m[1].toLowerCase()], m[3]);
+    return null;
+  }
 
   function lesen(mail) {
     const betreff = String(mail.betreff || '');
@@ -58,7 +76,8 @@
 
     // Datum des Ereignisses: beim Ticket aus dem Text („am 16.06.2026 um 17:04:35 Uhr … gezogen“), sonst Maildatum
     const gezogen = alles.match(/am (\d{1,2})\.(\d{1,2})\.(\d{2,4}) um (\d{1,2}:\d{2}(?::\d{2})?) Uhr[^.]{0,40}gezogen/i);
-    const maildatum = mail.datum ? String(mail.datum).slice(0, 10) : null;
+    // bei Weiterleitungen zählt das Datum der Originalmail
+    const maildatum = originalDatum(text) || (mail.datum ? String(mail.datum).slice(0, 10) : null);
     const datum = gezogen ? isoDatum(gezogen[1], gezogen[2], gezogen[3]) : (A.istDatum(maildatum) ? maildatum : null);
     const uhrzeit = gezogen ? (gezogen[4].length === 5 ? gezogen[4] + ':00' : gezogen[4]).padStart(8, '0') : null;
 
@@ -175,7 +194,7 @@
     return { erkannt, foerderung: z.f, zuordnung: z.ueber, kandidaten: z.kandidaten.map(f => f.id), ...a, status };
   }
 
-  const API = { ARTEN, lesen, zuordnen, aenderung, anwenden, verarbeiten, textAusHtml, kompakt };
+  const API = { ARTEN, lesen, zuordnen, aenderung, anwenden, verarbeiten, textAusHtml, kompakt, originalDatum };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else wurzel.EAG_OEMAG = API;
 })(typeof window !== 'undefined' ? window : globalThis);
