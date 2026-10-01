@@ -1,4 +1,4 @@
-// deno test supabase/functions/oemag/webhook_test.ts
+// deno test supabase/functions/oemag/webhook.pruefung.ts  (kein *_test-Name: sonst greift node --test zu)
 import { webhookEcht } from './webhook.ts';
 
 const geheim = 'whsec_' + btoa('ein-test-geheimnis-32-zeichen-lang!!');
