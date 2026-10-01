@@ -1,5 +1,5 @@
 // deno test supabase/functions/oemag/webhook.pruefung.ts  (kein *_test-Name: sonst greift node --test zu)
-import { webhookEcht } from './webhook.ts';
+import { secretGueltig, webhookEcht } from './webhook.ts';
 
 const geheim = 'whsec_' + btoa('ein-test-geheimnis-32-zeichen-lang!!');
 async function signiere(id: string, ts: string, body: string) {
@@ -26,4 +26,13 @@ Deno.test('veränderter Inhalt, falsches Geheimnis, alter Zeitstempel → abgele
   const h2 = new Headers({ 'svix-id': 'msg_1', 'svix-timestamp': alt, 'svix-signature': await signiere('msg_1', alt, body) });
   if (await webhookEcht(geheim, h2, body)) throw new Error('alter Zeitstempel angenommen');
   if (await webhookEcht(geheim, new Headers(), body)) throw new Error('ohne Header angenommen');
+});
+Deno.test('falsch eingetragenes Secret: kein Absturz, sondern abgelehnt und erkannt', async () => {
+  const sig = await signiere('msg_1', ts, body);
+  const h = new Headers({ 'svix-id': 'msg_1', 'svix-timestamp': ts, 'svix-signature': sig });
+  for (const falsch of ['re_AbC123_xyz', 'whsec_nicht base64!', '"whsec_abc"']) {
+    if (await webhookEcht(falsch, h, body)) throw new Error('angenommen: ' + falsch);
+    if (secretGueltig(falsch)) throw new Error('als gültig erkannt: ' + falsch);
+  }
+  if (!secretGueltig(geheim) || !secretGueltig(' ' + geheim + '\n')) throw new Error('echtes Secret nicht erkannt');
 });

@@ -19,7 +19,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import './ablauf.js';
 import './oemag.js';
-import { webhookEcht } from './webhook.ts';
+import { secretGueltig, webhookEcht } from './webhook.ts';
 
 // deno-lint-ignore no-explicit-any
 const O = (globalThis as any).EAG_OEMAG;
@@ -111,6 +111,10 @@ Deno.serve(async (req) => {
   let mails: Mail[];
   if (body.type === 'email.received') {
     // Resend: Signatur prüfen (oder Schlüssel in der Adresse), dann Inhalt holen
+    // Falsch eingetragenes Secret: 500, damit Resend es später erneut zustellt, sobald es stimmt
+    if (env('RESEND_WEBHOOK_SECRET') && !secretGueltig(env('RESEND_WEBHOOK_SECRET'))) {
+      return json({ fehler: 'RESEND_WEBHOOK_SECRET ist kein Signing Secret (whsec_…) – in Resend beim Webhook kopieren und in Supabase neu eintragen' }, 500);
+    }
     const echt = env('RESEND_WEBHOOK_SECRET') ? await webhookEcht(env('RESEND_WEBHOOK_SECRET'), req.headers, roh) : schluesselOk;
     if (!echt) return json({ fehler: 'Webhook nicht echt (Signatur bzw. Schlüssel)' }, 401);
     try { mails = [await resendMail(body.data?.email_id)]; }
