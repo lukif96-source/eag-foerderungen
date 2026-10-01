@@ -119,7 +119,7 @@ Deno.serve(async (req) => {
     const echt = env('RESEND_WEBHOOK_SECRET') ? await webhookEcht(env('RESEND_WEBHOOK_SECRET'), req.headers, roh) : schluesselOk;
     if (!echt) return json({ fehler: 'Webhook nicht echt (Signatur bzw. Schlüssel)' }, 401);
     try { mails = [await resendMail(body.data?.email_id)]; }
-    catch (e) { return json({ fehler: (e as Error).message }, 502); }
+    catch (e) { console.error('Resend-Abruf: ' + (e as Error).message); return json({ fehler: (e as Error).message }, 502); }
   } else if (body.abholen) {
     if (!env('MS_CLIENT_ID')) return json({ abgeholt: 0, hinweis: 'Microsoft-Zugang noch nicht eingerichtet – siehe docs/OEMAG-MAILS.md' });
     // ab der letzten verarbeiteten Mail (1 Tag Überlappung), höchstens 30 Tage zurück
