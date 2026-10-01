@@ -208,7 +208,8 @@ test('Fehlende Daten zählen nur bis zum Ticket und nur, solange der Call nicht 
 test('Ticket-Zieher braucht es nur bis zum Ticket-Tag', () => {
   assert.equal(A.naechsterTicketTag('2026-10-01'), '2026-10-08');
   assert.equal(A.naechsterTicketTag('2026-10-08'), '2026-10-08');
-  assert.equal(A.naechsterTicketTag('2026-10-09'), null);
+  assert.equal(A.naechsterTicketTag('2026-10-09'), '2026-10-08');   // Tag danach: nachtragen
+  assert.equal(A.naechsterTicketTag('2026-10-10'), null);
   assert.equal(A.IDX.aufgeteilt, undefined);   // kein eigener Schritt mehr
 });
 
@@ -220,4 +221,190 @@ test('Verteilen: gleichmäßig, bestehende Zuteilung bleibt, weggefallene Namen 
   assert.ok(neu.every(x => ['Verena', 'Bianca', 'Thomas'].includes(x.zieher)));
   const zaehl = {}; [{ zieher: 'Verena' }].concat(neu.map(x => ({ zieher: x.zieher }))).forEach(x => { zaehl[x.zieher] = (zaehl[x.zieher] || 0) + 1; });
   assert.deepEqual(Object.values(zaehl).sort(), [2, 2, 2]);  // 6 Tickets auf 3 Personen
+});
+
+// ── Status-Tracker ────────────────────────────────────────────────
+test('Tracker eine Woche vor dem Ticket-Tag: Call-Phase aktiv, Alarm, wir sind dran', () => {
+  const t = A.tracker(basis({ projekt: '2026-09-20' }), '2026-10-01');
+  assert.equal(t.zustand, 'aktiv');
+  assert.equal(t.ton, 'alarm');                     // 7 Tage = dringend
+  assert.equal(t.nummer, A.IDX.ticket + 1);
+  assert.equal(t.aktion.key, 'ticket');
+  assert.equal(t.aktion.wer, 'wir');
+  assert.equal(t.frist.art, 'ticket');
+  assert.deepEqual(t.phasen.map(p => p.zustand), ['fertig', 'aktiv', 'offen', 'offen', 'offen']);
+  assert.equal(t.phasen.reduce((s, p) => s + p.gesamt, 0), A.SCHRITTE.length);
+  assert.equal(t.phasen[1].schritte[0].zustand, 'jetzt');
+});
+
+test('Tracker beim Warten auf den Vertrag: Förderstelle ist dran, ruhig', () => {
+  const t = A.tracker(basis({ projekt: '✓', ticket: '2026-10-08', eingereicht: '2026-10-09' }), '2026-10-12');
+  assert.equal(t.zustand, 'wartet');
+  assert.equal(t.aktion.wer, 'foerderstelle');
+  assert.equal(t.phasen[2].zustand, 'aktiv');
+  assert.equal(t.phasen[2].schritte[0].zustand, 'wartet');
+  assert.equal(t.ton, 'ruhig');
+});
+
+test('Tracker: Vertrag ohne Datum → Schätzung oder leise „unbekannt“, nie Alarm', () => {
+  const f = basis({ projekt: '✓', ticket: '✓', eingereicht: '✓', vertrag_erhalten: '✓' });
+  const t = A.tracker(f, '2026-12-01');                     // frühestens 22.04.2027 – Schätzung
+  assert.equal(t.frist.geschaetzt, true);
+  assert.equal(t.ton, 'ruhig');
+  const spaet = A.tracker(f, '2028-01-01');                  // Schätzung vorbei → unbekannt, leise
+  assert.equal(spaet.frist.stufe, 'unbekannt');
+  assert.equal(spaet.ton, 'ruhig');
+});
+
+test('Tracker: Lücke färbt die Phase und macht aufmerksam', () => {
+  const t = A.tracker(basis({ projekt: '✓', eingereicht: '✓' }, { foerdercall: '' }), '2026-10-01');
+  assert.deepEqual(t.luecken, ['Ticket gezogen']);
+  assert.equal(t.phasen[1].zustand, 'luecke');
+  assert.equal(t.ton, 'achtung');
+});
+
+test('Tracker: abgelehnt und ausgezahlt haben keine Aktion', () => {
+  const ab = A.tracker(basis({ projekt: '✓', abgelehnt: '2026-07-10' }), '2026-10-01');
+  assert.equal(ab.zustand, 'beendet');
+  assert.equal(ab.aktion, null);
+  assert.equal(ab.ende.datum, '2026-07-10');
+  assert.equal(ab.phasen[0].zustand, 'fertig');
+  assert.equal(ab.phasen[1].zustand, 'gestoppt');
+  const alle = Object.fromEntries(A.SCHRITTE.filter(s => !s.auto).map(s => [s.key, '✓']));
+  const fertig = A.tracker(basis(alle), '2026-10-01');
+  assert.equal(fertig.zustand, 'fertig');
+  assert.equal(fertig.erledigt, A.SCHRITTE.length);
+  assert.ok(fertig.phasen.every(p => p.zustand === 'fertig'));
+});
+
+// ── Ticket gezogen ────────────────────────────────────────────────
+test('Ticket-Tag-Phasen: vorher, heute, Nachtrag am Tag danach, dann vorbei', () => {
+  assert.equal(A.ticketTagPhase('2026-10-08', '2026-10-01'), 'vorher');
+  assert.equal(A.ticketTagPhase('2026-10-08', '2026-10-08'), 'heute');
+  assert.equal(A.ticketTagPhase('2026-10-08', '2026-10-09'), 'nachtrag');
+  assert.equal(A.ticketTagPhase('2026-10-08', '2026-10-10'), null);
+});
+
+test('Ticket gezogen von jemand anderem: Zieher wird die Person, Würfel-Zuteilung bleibt gemerkt', () => {
+  const f = basis({ projekt: '✓' });                            // gewürfelt: Verena
+  const p = A.ticketGezogen(f, 'Bianca', '2026-10-08', '17:00:04');
+  assert.equal(p.zieher, 'Bianca');
+  assert.equal(p.schritte.ticket, '2026-10-08');
+  assert.equal(p.schritte.ticket_uhrzeit, '17:00:04');
+  assert.equal(p.schritte.zieher_geplant, 'Verena');
+  assert.equal(f.schritte.ticket, undefined);                    // Original unverändert
+  // Zurück auf die gewürfelte Person → kein Vermerk mehr
+  const zurueck = A.gezogenVon(Object.assign({}, f, p), 'Verena');
+  assert.equal(zurueck.zieher, 'Verena');
+  assert.equal(zurueck.schritte.zieher_geplant, undefined);
+});
+
+test('Ticket gezogen ohne Namen = gewürfelte Person; vorhandenes Ticket-Datum bleibt', () => {
+  const p = A.ticketGezogen(basis({ projekt: '✓', ticket: '2026-10-08' }), '', '2026-10-09', 'kaputt');
+  assert.equal(p.zieher, 'Verena');
+  assert.equal(p.schritte.ticket, '2026-10-08');
+  assert.equal(p.schritte.ticket_uhrzeit, undefined);
+  assert.equal(p.schritte.zieher_geplant, undefined);
+});
+
+test('Neu ansuchen löscht auch Uhrzeit und Würfel-Vermerk des alten Tickets', () => {
+  const f = basis({ projekt: '✓', ticket: '2026-06-16', ticket_uhrzeit: '17:00:02', zieher_geplant: 'Thomas', abgelehnt: '2026-07-10' }, { foerdercall: '2026-06-16' });
+  const p = A.neuAnsuchen(f, '2026-10-01');
+  assert.equal(p.schritte.ticket_uhrzeit, undefined);
+  assert.equal(p.schritte.zieher_geplant, undefined);
+});
+
+// ── Export und täglicher Lauf ─────────────────────────────────────
+test('Edge Functions nutzen dieselben Regeln (Kopien aus js/ sind aktuell)', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  [['foerder-taeglich', 'ablauf.js'], ['oemag', 'ablauf.js'], ['oemag', 'oemag.js']].forEach(([fn, datei]) => {
+    const original = fs.readFileSync(path.join(__dirname, '../js', datei), 'utf8');
+    const kopie = fs.readFileSync(path.join(__dirname, '../supabase/functions', fn, datei), 'utf8');
+    assert.equal(kopie, original, `Bitte js/${datei} nach supabase/functions/${fn}/ kopieren`);
+  });
+});
+
+test('Export-Zeile: Datum deutsch, Ticket-Uhrzeit, nächste Frist', () => {
+  const z = A.exportZeile(basis({ projekt: '2026-09-20', ticket: '2026-10-08', ticket_uhrzeit: '17:00:04' }), '2026-10-09');
+  assert.equal(z['Fördercall'], '08.10.2026');
+  assert.equal(z['Ticket gezogen'], '08.10.2026');
+  assert.equal(z['Ticket gezogen um'], '17:00:04');
+  assert.equal(z['Nächster Schritt'], 'Antrag im Portal einreichen');
+  assert.equal(z['Nächste Frist'], 'Antrag einreichen: 22.10.2026');
+});
+
+test('CSV für Excel: BOM, Strichpunkt, Komma-Zahlen, keine Formeln', () => {
+  const t = A.csv([{ Kunde: 'Huber; "Sepp"', kWp: 9.9, Notiz: '=HYPERLINK("x")' }]);
+  assert.ok(t.startsWith('﻿Kunde;kWp;Notiz\r\n'));
+  assert.ok(t.includes('"Huber; ""Sepp"""'));
+  assert.ok(t.includes(';9,9;'));
+  assert.ok(t.includes(`"'=HYPERLINK(""x"")"`));
+});
+
+test('Überfällige Fristen für den Lauf: nur echte Daten in der Vergangenheit, nichts aus dem Papierkorb', () => {
+  const vorbei = basis({ projekt: '✓' }, { foerdercall: '2026-06-16' });           // Ticket verpasst
+  const geloescht = basis({ projekt: '✓' }, { foerdercall: '2026-06-16', geloescht_am: '2026-07-01' });
+  const ok = basis({ projekt: '✓' });                                               // Ticket erst am 08.10.
+  const v = A.verpassteFristen([vorbei, geloescht, ok], '2026-10-01');
+  assert.equal(v.length, 1);
+  assert.equal(v[0].frist.art, 'ticket');
+  assert.ok(v[0].frist.tage < 0);
+});
+
+// ── Pflichtfelder und abgelehnte Förderungen ──────────────────────
+test('Für das Ticket reichen Name und Zählpunkt; der Rest ist Hinweis für den Antrag', () => {
+  const knapp = { kunde: 'Huber Sepp', zaehlpunkt: 'AT0030000000000000000000000000123', foerdercall: '2026-10-08', schritte: { projekt: '✓' } };
+  assert.deepEqual(A.fehlendeDaten(knapp), []);
+  assert.deepEqual(A.datenFehlen(knapp, '2026-10-01'), []);
+  assert.equal(A.aufgabe(knapp, A.status(knapp, '2026-10-01')).key, 'ticket');
+  assert.deepEqual(A.antragDatenFehlen(knapp), ['Straße', 'PLZ', 'Ort', 'Mail', 'kWp']);
+  assert.deepEqual(A.fehlendeDaten({ kunde: 'Huber Sepp', zaehlpunkt: '' }), ['Zählpunkt']);
+  // nach dem Einreichen kein Hinweis mehr
+  assert.deepEqual(A.antragDatenFehlen(Object.assign({}, knapp, { schritte: { eingereicht: '2026-10-09' } })), []);
+  // reiner Speicher braucht Speicher statt kWp
+  assert.ok(A.antragDatenFehlen({ art: 'Speicher', schritte: {} }).includes('Speicher'));
+});
+
+test('Neu ansuchen: Jahr folgt dem neuen Call, Ablehnungsdatum bleibt im Verlauf', () => {
+  const f = basis({ projekt: '✓', ticket: '2025-10-08', eingereicht: '2025-10-09', abgelehnt: '2025-12-02' }, { jahr: 2025, foerdercall: '2025-10-08' });
+  const p = A.neuAnsuchen(f, '2026-10-01');
+  assert.equal(p.foerdercall, '2026-10-08');
+  assert.equal(p.jahr, 2026);
+  assert.equal(p.schritte.frueher_abgelehnt, '2025-10-08');
+  assert.equal(p.schritte.frueher_abgelehnt_am, '2025-12-02');
+  const neu = Object.assign({}, f, p);
+  const v = A.ansuchen(neu, '2026-10-01');
+  assert.deepEqual(v.map(x => [x.call, x.ergebnis, x.datum]), [['2025-10-08', 'abgelehnt', '2025-12-02'], ['2026-10-08', 'laufend', null]]);
+});
+
+test('Jahresansicht zeigt abgelehnte aus Vorjahren, solange noch angesucht werden kann', () => {
+  const alt = basis({ projekt: '✓', abgelehnt: '2025-12-02' }, { jahr: 2025, foerdercall: '2025-10-08' });
+  assert.equal(A.imJahr(alt, '2026', '2026-10-01'), true);      // Call 08.10. offen
+  assert.equal(A.imJahr(alt, '2026', '2026-10-23'), false);     // kein Call mehr
+  assert.equal(A.imJahr(alt, '2025', '2026-10-01'), true);
+  const umgezogen = basis({ projekt: '✓' }, { jahr: 2025, foerdercall: '2026-10-08' });   // alter Datensatz ohne Jahr-Umzug
+  assert.equal(A.imJahr(umgezogen, '2026', '2026-10-01'), true);
+  assert.equal(A.imJahr(basis({}, { jahr: 2025, foerdercall: '2025-06-16' }), '2026', '2026-10-01'), false);
+});
+
+test('Ticket am Tag danach nachgetragen: Datum ist trotzdem der Calltag', () => {
+  const p = A.ticketGezogen(basis({ projekt: '✓' }), 'Bianca', '2026-10-09', '');
+  assert.equal(p.schritte.ticket, '2026-10-08');
+  assert.equal(p.schritte.ticket_uhrzeit, undefined);
+  // ohne bekannten Call: das übergebene Datum
+  assert.equal(A.ticketGezogen(basis({ projekt: '✓' }, { foerdercall: '' }), 'Bianca', '2026-10-09', '').schritte.ticket, '2026-10-09');
+});
+
+test('Nachforderung zur Endabrechnung: eigene Aufgabe und 4-Wochen-Frist, nach dem Nachreichen weg', () => {
+  const alle = Object.fromEntries(A.SCHRITTE.filter(s => !s.auto && s.key !== 'ausgezahlt').map(s => [s.key, '2026-07-01']));
+  const f = basis(Object.assign({}, alle, { nachforderung_abrechnung: '2026-08-03' }));
+  const st = A.status(f, '2026-08-10');
+  assert.equal(st.nachforderungAbrechnungOffen, true);
+  assert.equal(A.aufgabe(f, st).key, 'nachgereicht_abrechnung');
+  const [fr] = A.fristen(f, '2026-08-10');
+  assert.equal(fr.art, 'nachforderung_abrechnung');
+  assert.equal(fr.datum, '2026-08-31');
+  f.schritte.nachgereicht_abrechnung = '2026-08-20';
+  assert.equal(A.aufgabe(f).key, 'ausgezahlt');           // wieder: Auszahlung abwarten
+  assert.equal(A.fristen(f, '2026-08-21').some(x => x.art === 'nachforderung_abrechnung'), false);
 });

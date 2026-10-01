@@ -7,12 +7,16 @@
   const ALLE_LABEL = Object.assign({}, ...SCHRITTE.map(x => ({ [x.key]: x.label })), ...E.ENDE.map(x => ({ [x.key]: x.label })), E.NEBEN);
   // Gruppen der Übersicht: jeder Schritt, dazu "Unterlagen nachreichen" vor dem Warten auf den Vertrag
   const GRUPPEN = SCHRITTE.flatMap(x => x.key === 'vertrag_erhalten'
-    ? [{ key: 'nachgereicht', todo: 'Unterlagen nachreichen', kurz: 'Nachreichen', phase: 'call', neben: true }, x] : [x]);
+    ? [{ key: 'nachgereicht', todo: 'Unterlagen nachreichen', kurz: 'Nachreichen', phase: 'call', neben: true }, x]
+    : x.key === 'ausgezahlt' ? [{ key: 'nachgereicht_abrechnung', todo: 'Unterlagen zur Endabrechnung nachreichen', kurz: 'Nachreichen', phase: 'abrechnung', neben: true,
+        hilfe: 'Nur über das EAG-Portal.' }, x] : [x]);
 
   const $ = (s, el) => (el || document).querySelector(s);
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
   const esc = s => String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const heute = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const kurzDatum = v => { const t = datumDE(v); return t.length === 10 ? t.slice(0, 6) + t.slice(8) : t; };   // 16.06.26
+  const uhrJetzt = () => new Date().toTimeString().slice(0, 8);
   const datumDE = v => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v || ''); return m ? `${m[3]}.${m[2]}.${m[1]}` : (v || ''); };
   const zahlDE = v => (v === null || v === undefined || v === '') ? '' : Number(v).toLocaleString('de-AT', { maximumFractionDigits: 2 });
   const speicherLokal = {
@@ -24,7 +28,7 @@
     jahr: 'Jahr', programm: 'Programm', art: 'Art', foerdercall: 'Fördercall', mitarbeiter: 'Mitarbeiter', zieher: 'Ticket-Zieher',
     kunde: 'Kunde', geburtsdatum: 'Geb.-Datum', vollmacht: 'Vollmacht', strasse: 'Straße', plz: 'PLZ', ort: 'Ort', kg_gst: 'KG / Gst.-Nr.',
     zaehlpunkt: 'Zählpunkt', mail: 'Mail', projekt_nr: 'Projekt-Nr.', kwp: 'kWp', modulflaeche: 'Modulfläche m²', einspeisung: 'Einspeisung',
-    wr_leistung: 'WR-Leistung', speicher: 'Speicher', anbringung: 'Anbringung', zeitplan: 'Zeitplan', ticket: 'Ticket', fpj: 'FPJ-Nr.',
+    wr_leistung: 'WR-Leistung', speicher: 'Speicher', anbringung: 'Anbringung', zeitplan: 'Zeitplan', ticket: 'Ticket', fpj: 'FPJ-Nr.', eag_nr: 'EAG-Nr.',
     offene_punkte: 'Offene Punkte', info: 'Info', geloescht_am: 'Papierkorb', schritte: 'Ablauf'
   };
 
@@ -50,7 +54,8 @@
       { k: 'foerdercall', typ: 'date' },
       { k: 'mitarbeiter', label: 'Mitarbeiter (Verkauf)', liste: 'mitarbeiter' },
       { k: 'zieher', label: 'Ticket-Zieher', liste: 'zieher' },
-      { k: 'ticket', mono: true }, { k: 'fpj', label: 'FPJ-Nr. (Portal)', mono: true }
+      { k: 'ticket', mono: true }, { k: 'fpj', label: 'FPJ-Nr. (Portal)', mono: true },
+      { k: 'eag_nr', label: 'EAG-Nr. (Einreichung)', mono: true, nurWenn: 'eag_nr' }
     ] },
     { titel: 'Notizen', felder: [
       { k: 'offene_punkte', typ: 'textarea', breit: true }, { k: 'info', typ: 'textarea', breit: true }
@@ -74,10 +79,35 @@
   // Kleinigkeiten: Toast, Rückfrage
   // ---------------------------------------------------------------
   let toastTimer;
-  function toast(msg, art) {
+  // Toast; mit rueckgaengig (Funktion) gibt es 8 Sekunden lang „Rückgängig“ (auch ⌘Z / Strg+Z)
+  let rueckgaengigFn = null;
+  function toast(msg, art, rueckgaengig) {
     const t = $('#toast');
-    t.textContent = msg; t.className = 'toast' + (art ? ' toast-' + art : ''); t.hidden = false;
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, art === 'fehler' ? 6000 : 3000);
+    t.className = 'toast' + (art ? ' toast-' + art : '');
+    t.innerHTML = `<span>${esc(msg)}</span>${rueckgaengig ? '<button type="button" data-rueckgaengig>Rückgängig <kbd>⌘Z</kbd></button>' : ''}`;
+    t.hidden = false;
+    rueckgaengigFn = rueckgaengig || null;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; rueckgaengigFn = null; }, rueckgaengig ? 8000 : art === 'fehler' ? 6000 : 3000);
+  }
+  async function rueckgaengigMachen() {
+    const fn = rueckgaengigFn;
+    if (!fn) return;
+    rueckgaengigFn = null; $('#toast').hidden = true;
+    try { await fn(); toast('Rückgängig gemacht.'); } catch (e) { toast(E.fehlerText(e), 'fehler'); laden(); }
+  }
+  // Ändern mit Rückgängig: merkt sich die alten Werte genau der geänderten Felder
+  async function aendernMitRueckgaengig(d, patch, meldung) {
+    const vorher = {};
+    Object.keys(patch).forEach(k => { vorher[k] = d[k] === undefined ? null : JSON.parse(JSON.stringify(d[k])); });
+    try {
+      Object.assign(d, await Q.aendern(d.id, patch, d.geaendert_am));
+      toast(meldung(d), 'ok', async () => { Object.assign(d, await Q.aendern(d.id, vorher, d.geaendert_am)); fuelleFilter(); zeichne(); });
+      fuelleFilter(); zeichne();
+    } catch (e) {
+      if (e.konflikt) { toast('Der Eintrag wurde gerade von jemand anderem geändert – Liste neu geladen.', 'fehler'); laden(); }
+      else toast(E.fehlerText(e), 'fehler');
+    }
   }
 
   function frage(text, jaText, gefahr) {
@@ -191,6 +221,7 @@
     try {
       S.daten = await Q.liste();
       S.geladenUm = Date.now();
+      await postLaden();
       fuelleFilter();
       zeichne();
       if (!still) { /* ruhig */ }
@@ -227,14 +258,14 @@
   function passtBasis(d) {
     const f = S.filter;
     if (!!d.geloescht_am !== f.papierkorb) return false;
-    if (f.jahr && String(d.jahr) !== f.jahr) return false;
+    if (f.jahr && !E.imJahr(d, f.jahr, heute())) return false;
     if (f.call && (f.call === 'ohne' ? !!d.foerdercall : d.foerdercall !== f.call)) return false;
     if (f.art && d.art !== f.art) return false;
     if (f.mitarbeiter && (d.mitarbeiter || '').trim() !== f.mitarbeiter) return false;
     if (f.zieher && (f.zieher === '–' ? !!(d.zieher || '').trim() : !(d.zieher || '').split(' / ').map(s => s.trim()).includes(f.zieher))) return false;
     if (f.suche) {
       const q = f.suche.toLowerCase();
-      const heu = [d.kunde, d.ort, d.plz, d.strasse, d.zaehlpunkt, d.projekt_nr, d.ticket, d.fpj, d.mail, d.mitarbeiter, d.zieher, d.offene_punkte, d.info].join(' ').toLowerCase();
+      const heu = [d.kunde, d.ort, d.plz, d.strasse, d.zaehlpunkt, d.projekt_nr, d.ticket, d.fpj, d.eag_nr, d.mail, d.mitarbeiter, d.zieher, d.offene_punkte, d.info].join(' ').toLowerCase();
       if (!q.split(/\s+/).every(t => heu.includes(t))) return false;
     }
     return true;
@@ -279,6 +310,7 @@
     if (S.extra === 'frist') return fristBald(x);
     if (S.extra === 'offen') return hatOffenePunkte(x);
     if (S.extra === 'datenfehlen') return fehltDaten(x);
+    if (S.extra === 'abgelehnt') return !!(x.st.ende && x.st.ende.key === 'abgelehnt');
     return true;
   }
 
@@ -316,12 +348,14 @@
     const n = { todo: 0, warten: 0, fertig: 0, beendet: 0, alle: basis.length };
     basis.forEach(x => { n[kategorie(x.st, x.d)]++; });
     const offen = basis.filter(x => !x.st.ende && !x.st.fertig);
-    const alarm = { frist: offen.filter(fristBald).length, offen: offen.filter(hatOffenePunkte).length, datenfehlen: offen.filter(fehltDaten).length };
+    const alarm = { frist: offen.filter(fristBald).length, offen: offen.filter(hatOffenePunkte).length, datenfehlen: offen.filter(fehltDaten).length,
+      abgelehnt: E.offenerCall(heute()) ? basis.filter(x => x.st.ende && x.st.ende.key === 'abgelehnt').length : 0,
+      post: darf('bearbeiten') && S.post ? S.post.filter(p => p.status === 'offen' || p.status === 'vorschlag').length : 0 };
     const kritisch = offen.some(x => { const fr = E.fristen(x.d, heute())[0]; return fr && fr.stufe === 'ueberfaellig'; });
     const seg = (k, t) => `<button class="seg-knopf ${S.ansicht === k ? 'aktiv' : ''}" data-ansicht="${k}">${t}<span>${n[k]}</span></button>`;
     const chip = (k, icon, t, laut) => alarm[k] ? `<button class="alarm alarm-${k} ${laut ? 'laut' : ''} ${S.extra === k ? 'aktiv' : ''}" data-extra="${k}" title="${esc(t)}"><svg><use href="#${icon}"/></svg><b>${alarm[k]}</b><span>${t}</span></button>` : '';
     $('#reiter').innerHTML = `<div class="seg">${seg('todo', 'Zu tun')}${seg('warten', 'Wartet')}${seg('fertig', 'Fertig')}${seg('beendet', 'Beendet')}${seg('alle', 'Alle')}</div>
-      <div class="alarme">${chip('frist', 'i-history', 'Fristen', kritisch)}${chip('offen', 'i-flag', 'Offene Punkte')}${chip('datenfehlen', 'i-alert', 'Daten fehlen', true)}</div>`;
+      <div class="alarme">${chip('frist', 'i-history', 'Fristen', kritisch)}${chip('offen', 'i-flag', 'Offene Punkte')}${chip('datenfehlen', 'i-alert', 'Daten fehlen', true)}${chip('abgelehnt', 'i-restore', `abgelehnt – neu ansuchen bis ${datumDE(E.callEnde(E.offenerCall(heute()) || '') || '').slice(0, 6)}`, true)}${chip('post', 'i-doc', 'OeMAG-Mails prüfen', true)}</div>`;
   }
 
   // Phasen-Balken: 5 Phasen mit Anzahl, Klick filtert
@@ -349,7 +383,8 @@
     const fr = E.fristen(d, heute())[0];
     const s = d.schritte || {};
     const meta = [[d.plz, d.ort].filter(Boolean).join(' '), d.foerdercall ? 'Call ' + datumDE(d.foerdercall).slice(0, 6) + d.foerdercall.slice(2, 4) : '',
-      d.kwp ? zahlDE(d.kwp) + ' kWp' : '', d.zieher || ''].filter(Boolean);
+      d.kwp ? zahlDE(d.kwp) + ' kWp' : '', d.zieher || '',
+      st.ende && E.istDatum(s[st.ende.key]) ? `${st.ende.label.split(' /')[0].toLowerCase()} am ${datumDE(s[st.ende.key])}` : ''].filter(Boolean);
     let knopf = '';
     if (st.fertig) {
       knopf = `<span class="z-status ok"><svg><use href="#i-check"/></svg>${s.ausgezahlt && s.ausgezahlt !== '✓' ? datumDE(s.ausgezahlt) : 'ausgezahlt'}</span>`;
@@ -364,7 +399,8 @@
       knopf = `<button class="z-knopf leise" data-oeffnen>${esc(n.knopf)}</button>`;
     }
     const flags = [
-      s.frueher_abgelehnt ? `<span class="z-tag" title="Abgelehnt im Call ${esc(callsText(s.frueher_abgelehnt))}">2. Versuch</span>` : '',
+      E.nochmal(d) ? `<span class="z-tag z-nochmal" title="${s.frueher_abgelehnt ? 'Abgelehnt im Call ' + esc(callsText(s.frueher_abgelehnt)) : 'In der Excel orange markiert'}">Nochmal ansuchen${s.frueher_abgelehnt ? ' · abgelehnt ' + esc(callsText(s.frueher_abgelehnt)) : ''}</span>` : '',
+      n && n.key === 'eingereicht' && E.antragDatenFehlen(d).length ? `<span class="z-icon gelb" title="Für den Antrag fehlen: ${esc(E.antragDatenFehlen(d).join(', '))}"><svg><use href="#i-alert"/></svg></span>` : '',
       (d.offene_punkte || '').trim() ? `<span class="z-icon gelb" title="${esc(d.offene_punkte)}"><svg><use href="#i-flag"/></svg></span>` : '',
       fehlt.length ? `<span class="z-icon rot" title="Es fehlen: ${esc(fehlt.join(', '))}"><svg><use href="#i-alert"/></svg></span>` : ''
     ].join('');
@@ -391,7 +427,8 @@
       gruppen.get(key).push(x);
     });
     const defs = S.ansicht === 'fertig' ? [{ key: 'fertig', todo: 'Ausgezahlt', phase: 'fertig' }]
-      : S.ansicht === 'beendet' ? E.ENDE.map(e => ({ key: e.key, todo: e.label, phase: 'ende' }))
+      : S.ansicht === 'beendet' ? E.ENDE.map(e => ({ key: e.key, todo: e.label, phase: 'ende',
+          hilfe: e.key === 'abgelehnt' && E.offenerCall(heute()) ? `Neu ansuchen geht im Call ab ${datumDE(E.offenerCall(heute()))} bis ${datumDE(E.callEnde(E.offenerCall(heute())))}${E.offenerCall(heute()) === E.LETZTER_CALL ? ' – dem letzten' : ''}.` : '' }))
       : GRUPPEN;
     const RANG = { ueberfaellig: 0, dringend: 1, bald: 2, ruhig: 3, unbekannt: 4 };
     const dringlich = x => { const fr = E.fristen(x.d, heute())[0]; return fr ? RANG[fr.stufe] + (fr.datum || '') : '9'; };
@@ -431,25 +468,88 @@
     if (gespeichert && gespeichert.length) return gespeichert;
     return Array.from(new Set(ticketKandidaten(call).map(d => (d.zieher || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'de'));
   }
+  // Alle Tickets des Calls (auch schon gezogene) – für die Karte am Ticket-Tag und am Tag danach
+  function ticketTagListe(call) {
+    return S.daten.filter(d => !d.geloescht_am && d.foerdercall === call && !E.status(d).ende)
+      .sort((a, b) => (a.zieher || '').localeCompare(b.zieher || '', 'de') || (a.kunde || '').localeCompare(b.kunde || '', 'de'));
+  }
+  const gezogen = d => !!(d.schritte || {}).ticket;
+  // Kopier-Felder in der Reihenfolge, in der sie im Portal gebraucht werden (Tasten 1–7)
+  const KOPIER = [
+    ['Zählpunkt ohne AT', d => E.zpFuersTicket(d.zaehlpunkt)],
+    ['Kunde', d => d.kunde], ['Straße', d => d.strasse], ['PLZ', d => d.plz], ['Ort', d => d.ort],
+    ['kWp', d => d.kwp === null || d.kwp === undefined || d.kwp === '' ? '' : zahlDE(d.kwp)],
+    ['FPJ', d => d.fpj || d.projekt_nr]
+  ];
+  function ticketKarteHtml(d, namen, bearbeiten, phase) {
+    const s = d.schritte || {};
+    const z = E.zuschuss(d);
+    const wer = (d.zieher || '').trim();
+    const auswahl = `<select class="tk-von" data-tk-von title="Wer hat das Ticket gezogen?" ${bearbeiten ? '' : 'disabled'}>
+      ${Array.from(new Set([wer, ...namen].filter(Boolean))).map(n => `<option ${n === wer ? 'selected' : ''}>${esc(n)}</option>`).join('')}
+      ${wer ? '' : '<option selected value="">– wer? –</option>'}</select>`;
+    const stand = gezogen(d)
+      ? `<span class="tk-ok"><svg><use href="#i-check"/></svg>${s.ticket_uhrzeit ? esc(s.ticket_uhrzeit) : esc(datumDE(s.ticket))}</span><span class="tk-von-text">von</span>${auswahl}`
+        + (s.zieher_geplant ? `<span class="tk-plan" title="So war es gewürfelt">statt ${esc(s.zieher_geplant)}</span>` : '')
+      : bearbeiten && phase !== 'vorher' ? `${auswahl}<button class="erledigt" data-tk-gezogen><svg><use href="#i-check"/></svg>Gezogen</button>` : `<span class="tk-plan">${esc(wer || 'ohne Zieher')}</span>`;
+    return `<div class="tk ${gezogen(d) ? 'tk-fertig' : ''}" data-id="${d.id}" tabindex="0">
+      <div class="tk-kopf"><button class="tk-name" data-oeffnen-tk>${esc(d.kunde || '(ohne Namen)')}</button>
+        <span class="tk-meta">${esc([z ? 'Kat. ' + z.kat : '', d.kwp ? zahlDE(d.kwp) + ' kWp' : '', d.speicher || ''].filter(Boolean).join(' · '))}</span>${E.nochmal(d) ? '<span class="z-tag z-nochmal">Nochmal ansuchen</span>' : ''}${E.zpPruefung(d.zaehlpunkt) === 'fehlt' ? '<span class="tk-warn">Zählpunkt fehlt – ohne gibt es kein Ticket</span>' : E.zpPruefung(d.zaehlpunkt) === 'ungueltig' ? '<span class="tk-warn">Zählpunkt prüfen (31 Zeichen)</span>' : ''}
+        <span class="tk-stand">${stand}</span></div>
+      <div class="tk-kopien">${KOPIER.map(([l, f], i) => { const v = f(d); return `<button class="tk-kopie" data-kopie="${i}" ${v ? '' : 'disabled'} title="${esc(v || 'fehlt')} – Taste ${i + 1}"><kbd>${i + 1}</kbd>${esc(l)}</button>`; }).join('')}</div>
+    </div>`;
+  }
   function ticketTagHtml() {
     const call = E.naechsterTicketTag(heute());
     if (!call) return '';
+    const phase = E.ticketTagPhase(call, heute());
+    const alle = ticketTagListe(call);
     const k = ticketKandidaten(call);
-    if (!k.length) return '';
+    if (!alle.length || (phase === 'vorher' && !k.length)) return '';
     const namen = ticketZieherNamen(call);
-    const zahl = n => k.filter(d => (d.zieher || '').trim() === n).length;
+    const zahl = n => alle.filter(d => (d.zieher || '').trim() === n).length;
+    const zahlGezogen = n => alle.filter(d => (d.zieher || '').trim() === n && gezogen(d)).length;
     const ohne = k.filter(d => !namen.includes((d.zieher || '').trim())).length;
+    const nGezogen = alle.filter(gezogen).length;
     const tage = Math.round((Date.parse(call) - Date.parse(heute())) / 864e5);
     const bearbeiten = darf('bearbeiten');
-    return `<section class="tt">
-      <div class="tt-kopf"><svg><use href="#i-dice"/></svg><div><b>Ticket-Tag ${esc(datumDE(call))} · ab 17:00 Uhr</b>
-        <span>${k.length} Tickets · ${tage === 0 ? 'heute' : tage === 1 ? 'morgen' : `in ${tage} Tagen`}${ohne ? ` · <b class="rot">${ohne} noch ohne Zieher</b>` : ' · alle verteilt'}</span></div>
-        ${k.length ? '<button class="g-knopf" data-aktion="zieher-excel"><svg><use href="#i-download"/></svg>Excel je Zieher</button>' : ''}</div>
-      ${namen.length ? `<div class="tt-namen">${namen.map(n => `<button class="tt-chip ${S.filter.zieher === n && S.filter.call === call ? 'aktiv' : ''}" data-zieher="${esc(n)}">${esc(n)}<b>${zahl(n)}</b></button>`).join('')}</div>` : ''}
-      ${bearbeiten ? `<form class="tt-form" id="tt-form"><input id="tt-namen" class="sp-inp" value="${esc(namen.join(', '))}" placeholder="Namen der Ticket-Zieher, mit Komma getrennt – z. B. Verena, Bianca, Thomas" autocomplete="off">
+    const titel = phase === 'nachtrag' ? `Ticket-Tag ${datumDE(call)} – heute eintragen, wer gezogen hat`
+      : `Ticket-Tag ${datumDE(call)} · ab 17:00 Uhr`;
+    const unter = phase === 'vorher'
+      ? `${k.length} Tickets · ${tage === 1 ? 'morgen' : `in ${tage} Tagen`}${ohne ? ` · <b class="rot">${ohne} noch ohne Zieher</b>` : ' · alle verteilt'}`
+      : `${nGezogen} von ${alle.length} gezogen${phase === 'heute' ? ' · heute' : ' · die Liste bleibt nur noch heute'}${ohne ? ` · <b class="rot">${ohne} ohne Zieher</b>` : ''}`;
+    const sichtbar = phase === 'vorher' ? [] : alle.filter(d => !S.filter.zieher || (d.zieher || '').trim() === S.filter.zieher);
+    return `<section class="tt tt-${phase}">
+      <div class="tt-kopf"><svg><use href="#i-dice"/></svg><div><b>${esc(titel)}</b><span>${unter}</span></div>
+        <button class="g-knopf" data-aktion="zieher-excel"><svg><use href="#i-download"/></svg>Excel je Zieher</button></div>
+      ${namen.length ? `<div class="tt-namen">${namen.map(n => `<button class="tt-chip ${S.filter.zieher === n && S.filter.call === call ? 'aktiv' : ''}" data-zieher="${esc(n)}">${esc(n)}<b>${phase === 'vorher' ? zahl(n) : `${zahlGezogen(n)}/${zahl(n)}`}</b></button>`).join('')}</div>` : ''}
+      ${bearbeiten && phase !== 'nachtrag' ? `<form class="tt-form" id="tt-form"><input id="tt-namen" class="sp-inp" value="${esc(namen.join(', '))}" placeholder="Namen der Ticket-Zieher, mit Komma getrennt – z. B. Verena, Bianca, Thomas" autocomplete="off">
         <button class="btn btn-primaer" type="submit"><svg><use href="#i-dice"/></svg>Verteilen</button></form>
         <p class="tt-hilfe">Neue Namen eintragen und Enter: Wer noch keinen Zieher hat, wird zufällig und gleichmäßig verteilt. Fällt ein Name weg, werden seine Tickets neu verteilt. Bestehende Zuteilungen bleiben.</p>` : ''}
+      ${sichtbar.length ? `<div class="tk-liste">${sichtbar.map(d => ticketKarteHtml(d, namen, bearbeiten, phase)).join('')}</div>
+        <p class="tt-hilfe">Ziffern 1–7 kopieren das Feld der markierten Karte. „Gezogen“ speichert Datum, Uhrzeit und wer gezogen hat – zieht jemand anderer, vorher den Namen umstellen.</p>` : ''}
     </section>`;
+  }
+  async function ticketSpeichern(id, patchFn, meldung) {
+    const d = S.daten.find(x => x.id === id);
+    if (d) await aendernMitRueckgaengig(d, patchFn(d), meldung);
+  }
+  const ticketUhrzeit = d => d.foerdercall === heute() ? uhrJetzt() : '';
+  function ticketGezogenSpeichern(id, von) {
+    const d = S.daten.find(x => x.id === id);
+    if (d && !String(von || '').trim() && !String(d.zieher || '').trim()) { toast('Bitte zuerst auswählen, wer das Ticket gezogen hat.', 'fehler'); return; }
+    return ticketSpeichern(id, d => E.ticketGezogen(d, von, heute(), ticketUhrzeit(d)),
+      d => `${d.kunde}: Ticket gezogen von ${d.zieher}${d.schritte.ticket_uhrzeit ? ' um ' + d.schritte.ticket_uhrzeit : ''} ✓`);
+  }
+  function gezogenVonSpeichern(id, von) {
+    return ticketSpeichern(id, d => E.gezogenVon(d, von), d => `${d.kunde}: gezogen von ${d.zieher}`);
+  }
+  async function kopieren(knopf, wert) {
+    try { await navigator.clipboard.writeText(wert); } catch (e) {
+      const t = document.createElement('textarea'); t.value = wert; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove();
+    }
+    knopf.classList.add('kopiert');
+    setTimeout(() => knopf.classList.remove('kopiert'), 900);
   }
   async function ticketZieherSpeichern(text) {
     const call = E.naechsterTicketTag(heute());
@@ -526,15 +626,8 @@
   async function schnellErledigt(id, key) {
     const d = S.daten.find(x => x.id === id);
     if (!d) return;
-    try {
-      const neu = await Q.aendern(id, { schritte: Object.assign({}, d.schritte || {}, { [key]: heute() }) }, d.geaendert_am);
-      Object.assign(d, neu);
-      toast(`${d.kunde}: ${ALLE_LABEL[key] || key} ✓`, 'ok');
-      zeichne();
-    } catch (e) {
-      if (e.konflikt) { toast('Der Eintrag wurde gerade von jemand anderem geändert – Liste neu geladen.', 'fehler'); laden(); }
-      else toast(E.fehlerText(e), 'fehler');
-    }
+    if (key === 'ticket') return ticketGezogenSpeichern(id, d.zieher);
+    await aendernMitRueckgaengig(d, { schritte: Object.assign({}, d.schritte || {}, { [key]: heute() }) }, x => `${x.kunde}: ${ALLE_LABEL[key] || key}`);
   }
 
   // Abgelehnt → im offenen Call neu ansuchen (Ticket weg, Projekt bleibt, Herkunft gemerkt)
@@ -590,7 +683,7 @@
 
   function feldHtml(f, rec, nurLesen) {
     const k = f.k, v = rec[k];
-    const label = f.label || FELD_LABEL[k] || k;
+    const label = k === 'zieher' && (rec.schritte || {}).ticket ? 'Ticket gezogen von' : (f.label || FELD_LABEL[k] || k);
     const dis = nurLesen ? 'disabled' : '';
     let inp;
     if (f.typ === 'select') {
@@ -611,9 +704,14 @@
 
   // Prüf-Hinweise direkt unter einem Feld
   function feldHinweis(k, rec) {
+    if (k === 'zieher') {
+      const s = rec.schritte || {};
+      return s.zieher_geplant ? `gewürfelt war ${esc(s.zieher_geplant)}` : '';
+    }
     if (k === 'zaehlpunkt') {
       const p = E.zpPruefung(rec.zaehlpunkt);
-      return p === 'ohneAT' ? '31 Stellen ohne „AT“ – im EAG-Portal mit AT davor eintragen'
+      return p === 'ohneAT' ? 'Ohne „AT“ – so fürs Ticket richtig; beim Antrag im Portal mit AT'
+        : p === 'ok' ? 'Fürs Ticket ohne „AT“ eingeben – der Kopier-Knopf am Ticket-Tag lässt es weg'
         : p === 'ungueltig' ? '<b class="rot">Format prüfen: AT + 31 Zeichen</b>' : '';
     }
     if (k === 'kwp' && (rec.programm || 'EAG') === 'EAG') {
@@ -652,6 +750,7 @@
         <span>${st.erledigt[i] ? '<svg><use href="#i-check"/></svg>' : i + 1}</span></label>
       <span class="ablauf-titel">${esc(x.label)}${st.luecken.includes(i) ? ' <span class="luecke-text">übersprungen?</span>' : ''}</span>
       <input type="date" class="ablauf-datum" data-schritt-datum="${x.key}" value="${esc(datum)}" ${nurLesen ? 'disabled' : ''} title="Datum">
+      ${x.key === 'ticket' && w && (rec.zieher || (rec.schritte || {}).ticket_uhrzeit) ? `<span class="ablauf-auto">${esc([rec.zieher ? 'von ' + rec.zieher : '', (rec.schritte || {}).ticket_uhrzeit ? 'um ' + rec.schritte.ticket_uhrzeit : ''].filter(Boolean).join(' · '))}</span>` : ''}
       ${w === '✓' ? `<span class="ablauf-auto">${x.key === 'vertrag_erhalten' ? 'erledigt, Datum unbekannt – optional, macht die Fristen genau' : 'erledigt, Datum unbekannt'}</span>` : hilfe}</li>`;
   }
 
@@ -675,6 +774,10 @@
           html += neben('nachforderung', 'Nachforderung erhalten');
           if (s.nachforderung) html += neben('nachgereicht', 'Unterlagen nachgereicht');
         }
+        if (x.key === 'abgeschlossen' && (st.erledigt[i] || s.nachforderung_abrechnung)) {
+          html += neben('nachforderung_abrechnung', 'Nachforderung zur Endabrechnung');
+          if (s.nachforderung_abrechnung) html += neben('nachgereicht_abrechnung', 'Unterlagen nachgereicht');
+        }
         if (x.key === 'inbetriebnahme' && ((st.erledigt[E.IDX.vertrag_erhalten] && !st.erledigt[i]) || s.verlaengert_bis)) {
           html += neben('verlaengert_bis', 'Frist verlängert bis');
         }
@@ -682,8 +785,12 @@
     });
     const ende = nurLesen ? '' : `<div class="ergebnis"><span class="grau klein">Endet ohne Auszahlung?</span><div class="ergebnis-knoepfe">${E.ENDE.map(e =>
       `<button type="button" class="btn btn-mini-leise ${s[e.key] ? 'aktiv' : ''}" data-ende="${e.key}">${s[e.key] ? '✓ ' : ''}${esc(e.label)}</button>`).join('')}</div></div>`;
-    const frueher = s.frueher_abgelehnt ? `<p class="klein grau">Abgelehnt im Call ${esc(callsText(s.frueher_abgelehnt))}, danach neu angesucht.</p>` : '';
-    return fristenHtml(rec) + html + '</ol></details>' + frueher + ende;
+    const verlauf = E.ansuchen(rec, heute());
+    const ERG = { abgelehnt: 'abgelehnt', zurueckgezogen: 'zurückgezogen', erloschen: 'Zusage erloschen', ausgezahlt: 'ausgezahlt', laufend: 'läuft' };
+    const frueher = verlauf.length > 1 || (verlauf[0] && verlauf[0].ergebnis === 'abgelehnt') ? `<div class="ansuchen"><div class="ansuchen-titel">Ansuchen</div>${verlauf.map((a, i) =>
+      `<div class="ansuchen-zeile a-${a.ergebnis}"><span class="ansuchen-nr">${i + 1}</span><span>Call ${a.call ? kurzDatum(a.call) : '–'}</span>
+        <b>${esc(ERG[a.ergebnis] || a.ergebnis)}${a.datum ? ' ' + kurzDatum(a.datum) : ''}</b></div>`).join('')}</div>` : '';
+    return fristenHtml(rec) + frueher + html + '</ol></details>' + ende;
   }
 
   function jetztHtml(rec, nurLesen, neu) {
@@ -692,23 +799,37 @@
     return jetztKasten(rec, nurLesen, neu) + punkteHtml;
   }
 
+  // Status-Tracker: je Phase ein Abschnitt, je Schritt ein Strich – auf einen Blick, wo die Förderung steht
+  const TR_ZUSTAND = { fertig: 'erledigt', jetzt: 'jetzt dran', wartet: 'wartet auf Förderstelle', luecke: 'übersprungen?', offen: 'offen' };
+  function trackerLeiste(t) {
+    return `<div class="tr" role="img" aria-label="${esc(`${t.erledigt} von ${t.gesamt} Schritten erledigt`)}">${t.phasen.map(p =>
+      `<div class="tr-ph tr-${p.zustand}" style="flex:${p.gesamt}">
+        <div class="tr-kopf"><span>${esc(p.label)}</span><b>${p.fertig}/${p.gesamt}</b></div>
+        <div class="tr-striche">${p.schritte.map(x => `<i class="tr-s tr-s-${x.zustand}" title="${esc(x.label)} · ${esc(x.wert && x.wert !== '✓' ? datumDE(x.wert) : TR_ZUSTAND[x.zustand])}"></i>`).join('')}</div>
+      </div>`).join('')}</div>`;
+  }
+
   function jetztKasten(rec, nurLesen, neu) {
     if (neu) return '<div class="jetzt jetzt-neu"><div class="jetzt-text"><small>Neuer Kunde</small><b>Daten eintragen und speichern</b></div></div>';
     const st = E.status(rec);
-    if (st.fertig) return '<div class="jetzt jetzt-fertig"><div class="jetzt-text"><small>Stand</small><b>Komplett erledigt – ausgezahlt</b></div></div>';
+    const t = E.tracker(rec, heute());
+    const leiste = trackerLeiste(t);
+    if (st.fertig) return `<div class="jetzt jetzt-fertig">${leiste}<div class="jetzt-text"><small>Stand</small><b>Komplett erledigt – ausgezahlt</b></div></div>`;
     if (st.ende) {
       const w = (rec.schritte || {})[st.ende.key];
       const call = E.offenerCall(heute());
       const text = st.ende.key !== 'abgelehnt' ? 'Keine weiteren Schritte.'
         : call ? `Neu ansuchen geht bis ${datumDE(E.callEnde(call))}: Ticket am ${datumDE(call)} ab 17:00 Uhr.` : 'Kein Fördercall mehr offen – 2027 gibt es keinen.';
-      return `<div class="jetzt jetzt-ende"><div class="jetzt-text"><small>Beendet</small><b>${esc(st.ende.label)}${w && w !== '✓' ? ' am ' + datumDE(w) : ''}</b><span>${esc(text)}</span></div>
+      return `<div class="jetzt jetzt-ende">${leiste}<div class="jetzt-text"><small>Beendet</small><b>${esc(st.ende.label)}${w && w !== '✓' ? ' am ' + datumDE(w) : ''}</b><span>${esc(text)}</span></div>
         ${st.ende.key === 'abgelehnt' && call && !nurLesen ? `<button class="erledigt erledigt-gross" data-neu-ansuchen-detail><svg><use href="#i-restore"/></svg>Im Call ${esc(datumDE(call))} neu ansuchen</button>` : ''}</div>`;
     }
     const n = E.aufgabe(rec, st);
-    const fr = E.fristen(rec, heute())[0];
-    const hinweis = n.key === 'daten' ? 'Unten die fehlenden Angaben ergänzen: ' + E.datenFehlen(rec, heute()).join(', ') : (n.hilfe || '');
-    const laut = fr && ['ueberfaellig', 'dringend'].includes(fr.stufe);
-    return `<div class="jetzt ${laut ? 'jetzt-dringend' : ''}"><div class="jetzt-text"><small>Als Nächstes · ${n.neben ? 'Nebenschritt' : `Schritt ${st.naechster + 1} von ${SCHRITTE.length}`}</small><b>${esc(n.todo)}</b>${n.warten ? '<span>Wartet auf die Förderstelle – abhaken, sobald es da ist.</span>' : ''}${hinweis ? `<span>${esc(hinweis)}</span>` : ''}${fr ? `<span class="jetzt-frist">${fristBadge(fr, true)}</span>` : ''}</div>
+    const fr = t.frist;
+    const antragFehlt = n.key === 'eingereicht' ? E.antragDatenFehlen(rec) : [];
+    const hinweis = n.key === 'daten' ? 'Für das Ticket fehlt: ' + E.datenFehlen(rec, heute()).join(', ')
+      : antragFehlt.length ? 'Für den Antrag im Portal noch ergänzen: ' + antragFehlt.join(', ') : (n.hilfe || '');
+    const wer = t.aktion.wer === 'foerderstelle' ? 'Förderstelle ist dran' : 'Wir sind dran';
+    return `<div class="jetzt ${t.ton === 'alarm' ? 'jetzt-dringend' : ''}">${leiste}<div class="jetzt-text"><small>Als Nächstes · ${n.neben ? 'Nebenschritt' : `Schritt ${t.nummer} von ${t.gesamt}`} · ${wer}</small><b>${esc(n.todo)}</b>${n.warten ? '<span>Wartet auf die Förderstelle – abhaken, sobald es da ist.</span>' : ''}${hinweis ? `<span>${esc(hinweis)}</span>` : ''}${fr ? `<span class="jetzt-frist">${fristBadge(fr, true)}</span>` : ''}</div>
       ${!nurLesen && !n.auto ? `<button class="erledigt erledigt-gross" data-jetzt="${n.key}"><svg><use href="#i-check"/></svg>${esc(n.knopf)} – speichern</button>` : ''}</div>`;
   }
 
@@ -733,7 +854,8 @@
       <div class="detail-raster">
         <section class="karte karte-ablauf"><h3><svg><use href="#i-bolt"/></svg>Ablauf</h3><div id="d-ablauf">${ablaufHtml(rec, nurLesen)}</div></section>
         <div class="detail-felder">
-          ${FORM.map(sec => `<section class="karte"><h3>${esc(sec.titel)}</h3><div class="felder">${sec.felder.map(f => feldHtml(f, rec, nurLesen)).join('')}</div></section>`).join('')}
+          ${FORM.map(sec => `<section class="karte"><h3>${esc(sec.titel)}</h3><div class="felder">${sec.felder.filter(f => !f.nurWenn || spalteDa(f.nurWenn)).map(f => feldHtml(f, rec, nurLesen)).join('')}</div></section>`).join('')}
+          ${neu ? '' : postAkteHtml(rec)}
           ${neu ? '' : `<section class="karte"><h3><svg><use href="#i-history"/></svg>Verlauf</h3><div id="d-verlauf" class="verlauf grau">wird geladen …</div></section>`}
         </div>
       </div>`;
@@ -788,7 +910,8 @@
     if (el.dataset.schritt) {
       const key = el.dataset.schritt;
       const s = Object.assign({}, rec.schritte);
-      if (el.checked) s[key] = heute(); else delete s[key];
+      if (el.checked) s[key] = key === 'ticket' && E.istDatum(rec.foerdercall) && heute() >= rec.foerdercall ? rec.foerdercall : heute(); else delete s[key];
+      if (key === 'ticket') { if (el.checked && ticketUhrzeit(rec)) s.ticket_uhrzeit = uhrJetzt(); else if (!el.checked) delete s.ticket_uhrzeit; }
       rec.schritte = s;
       ablaufNeu();
     } else if (el.dataset.schrittDatum) {
@@ -973,6 +1096,195 @@
   // ---------------------------------------------------------------
   // Dialog-Helfer
   // ---------------------------------------------------------------
+  // ---------------------------------------------------------------
+  // OeMAG-Posteingang: Mails werden automatisch gelesen (Edge Function „oemag“) oder hier eingefügt.
+  // Kennungen und geprüfte Mail-Arten sind schon übernommen; Vorschläge mit einem Klick.
+  // ---------------------------------------------------------------
+  const spalteDa = k => Q.demo || S.daten.some(d => k in d);
+  async function postLaden() {
+    if (!S.ich || !darf('lesen')) return;
+    try { S.post = await Q.posteingang(); S.postFehlt = false; }
+    catch (e) { S.post = null; S.postFehlt = !!e.fehlt; }
+  }
+  const PE_STATUS = { offen: 'nicht zugeordnet', vorschlag: 'Vorschlag', angewendet: 'übernommen', erledigt: 'nichts zu tun', ignoriert: 'ignoriert' };
+  const PE_ZU = { eag_nr: 'über die EAG-Nr.', fpj: 'über die FPJ-Nr.', zaehlpunkt: 'über den Zählpunkt', hand: 'von Hand', mehrdeutig: 'mehrdeutig' };
+  // Automatisch + Vorschlag zusammen (für „Übernehmen“ von Hand)
+  function peGesamt(a, b) {
+    const x = Object.assign({}, a || {}, b || {});
+    if ((a && a.schritte) || (b && b.schritte)) x.schritte = Object.assign({}, (a || {}).schritte, (b || {}).schritte);
+    return x;
+  }
+  function peKarte(p, bearbeiten) {
+    const e = p.erkannt || {};
+    const f = p.foerderung_id ? S.daten.find(d => d.id === p.foerderung_id) : null;
+    const chips = [e.eagNr && ['EAG-Nr.', e.eagNr], e.zaehlpunkt && ['Zählpunkt', '…' + e.zaehlpunkt.slice(-8)], e.ticket && ['Ticket', e.ticket + (e.uhrzeit ? ' · ' + e.uhrzeit : '')],
+      e.fristBis && ['Frist', datumDE(e.fristBis)], e.grund && ['Grund', e.grund]].filter(Boolean);
+    const offen = p.status === 'offen' || p.status === 'vorschlag';
+    const kandidaten = (p.kandidaten || []).map(id => S.daten.find(d => d.id === id)).filter(Boolean);
+    const wahl = !f && bearbeiten && offen ? `<select class="pe-wahl" data-pe-wahl="${p.id}"><option value="">Förderung wählen …</option>
+        ${(kandidaten.length ? kandidaten : S.daten.filter(d => !d.geloescht_am).sort((a, b) => (a.kunde || '').localeCompare(b.kunde || '', 'de')))
+          .map(d => `<option value="${d.id}">${esc(d.kunde || '(ohne Namen)')} · ${esc(d.ort || '')} · …${esc(String(d.zaehlpunkt || '').slice(-6))}</option>`).join('')}</select>` : '';
+    return `<article class="pe-karte pe-${p.status}">
+      <header class="pe-kopf"><span class="pe-art ${p.sicher ? 'pe-sicher' : ''}">${esc((E.OEMAG.ARTEN.find(a => a.art === p.art) || { label: 'Nicht erkannt' }).label)}</span>
+        <span class="pe-status">${esc(PE_STATUS[p.status] || p.status)}</span><span class="pe-zeit">${new Date(p.empfangen_am).toLocaleString('de-AT', { dateStyle: 'short', timeStyle: 'short' })}</span></header>
+      <div class="pe-betreff">${esc(p.betreff || '(ohne Betreff)')}</div>
+      ${chips.length ? `<div class="pe-chips">${chips.map(([l, v]) => `<span><small>${esc(l)}</small>${esc(v)}</span>`).join('')}</div>` : ''}
+      ${e.unterlagen && e.unterlagen.length ? `<div class="pe-unterlagen">Unterlagen: ${esc(e.unterlagen.join('; '))}</div>` : ''}
+      <div class="pe-ziel">${f ? `<button class="link" data-pe="oeffnen" data-id="${f.id}">${esc(f.kunde || '(ohne Namen)')}</button> <span class="grau">${esc(PE_ZU[p.zuordnung] || '')}</span>`
+        : p.zuordnung === 'mehrdeutig' ? '<span class="rot">Mehrere Förderungen passen – bitte wählen</span>' : '<span class="grau">Keine Förderung gefunden</span>'} ${wahl}</div>
+      ${(p.notizen || []).length ? `<ul class="pe-notizen">${p.notizen.map(n => `<li class="${n.startsWith('⚠') ? 'rot' : ''}">${esc(n)}</li>`).join('')}</ul>` : ''}
+      <details class="pe-text"><summary>Mailtext</summary><pre>${esc(p.text || '')}</pre></details>
+      ${bearbeiten && offen ? `<footer class="pe-fuss"><button class="btn btn-leise" data-pe="ignorieren" data-id="${p.id}">Ignorieren</button>
+        <button class="btn btn-primaer" data-pe="uebernehmen" data-id="${p.id}" ${f ? '' : 'disabled'}><svg><use href="#i-check"/></svg>Übernehmen</button></footer>` : ''}
+    </article>`;
+  }
+  function postAkteHtml(rec) {
+    const mails = (S.post || []).filter(p => p.foerderung_id === rec.id);
+    if (!mails.length) return '';
+    return `<section class="karte"><h3><svg><use href="#i-doc"/></svg>OeMAG-Mails</h3><div class="verlauf">${mails.map(p =>
+      `<div class="verlauf-zeile"><span class="verlauf-zeit">${new Date(p.empfangen_am).toLocaleDateString('de-AT')} · ${esc(PE_STATUS[p.status] || p.status)}</span>
+        <span>${esc((E.OEMAG.ARTEN.find(a => a.art === p.art) || { label: p.betreff }).label)}${(p.notizen || []).length ? ' – ' + esc(p.notizen.join(' · ')) : ''}</span></div>`).join('')}</div></section>`;
+  }
+  async function postDialog() {
+    dialog('OeMAG-Posteingang', '<p class="grau">wird geladen …</p>');
+    await postLaden();
+    if (S.postFehlt || !S.post) {
+      $('#dlg-inhalt').innerHTML = `<p><b>Der Posteingang ist in der Datenbank noch nicht eingerichtet.</b></p>
+        <p>Einmal <span class="mono">sql/oemag.sql</span> im Supabase-Dashboard unter <b>SQL Editor</b> ausführen – Anleitung in <span class="mono">docs/OEMAG-MAILS.md</span>.</p>`;
+      return;
+    }
+    const bearbeiten = darf('bearbeiten');
+    const zuPruefen = S.post.filter(p => p.status === 'offen' || p.status === 'vorschlag');
+    const zuletzt = S.post.filter(p => p.status === 'angewendet' || p.status === 'erledigt').slice(0, 25);
+    $('#dlg-inhalt').innerHTML = `
+      <p class="grau">Mails der OeMAG werden automatisch gelesen. EAG-Nr., Ticketnummer und FPJ sowie <b>Ticket gezogen, Ablehnung und
+        Nachforderung zur Endabrechnung</b> werden sofort übernommen; alles andere steht hier zum Bestätigen.</p>
+      ${bearbeiten ? `<section class="pe-einfuegen"><h3>Mail einfügen</h3>
+        <textarea id="pe-text" rows="5" placeholder="OeMAG-Mail hier einfügen – Betreff in die erste Zeile, darunter der Text"></textarea>
+        <div class="pe-einfuegen-fuss"><label class="klein grau">Mail vom <input type="date" id="pe-datum" value="${heute()}"></label>
+          <button class="btn btn-primaer" data-pe="einfuegen"><svg><use href="#i-bolt"/></svg>Auslesen und übernehmen</button></div></section>` : ''}
+      <h3 class="pe-titel">Zu prüfen <span class="g-n">${zuPruefen.length}</span></h3>
+      ${zuPruefen.length ? zuPruefen.map(p => peKarte(p, bearbeiten)).join('') : '<p class="grau">Nichts zu prüfen.</p>'}
+      ${zuletzt.length ? `<h3 class="pe-titel">Zuletzt übernommen</h3>${zuletzt.map(p => peKarte(p, bearbeiten)).join('')}` : ''}`;
+  }
+  async function sha256Text(t) {
+    const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
+    return Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  async function postAktion(b) {
+    const O = E.OEMAG;
+    const p = b.dataset.id ? (S.post || []).find(x => String(x.id) === b.dataset.id) : null;
+    try {
+      if (b.dataset.pe === 'oeffnen') { dialogZu(); oeffne(S.daten.find(d => d.id === b.dataset.id)); return; }
+      if (b.dataset.pe === 'ignorieren') { await Q.posteingangStatus(p.id, 'ignoriert'); toast('Ignoriert.'); }
+      if (b.dataset.pe === 'uebernehmen') {
+        const wahl = $(`[data-pe-wahl="${p.id}"]`);
+        const fid = p.foerderung_id || (wahl && wahl.value);
+        const f = S.daten.find(d => d.id === fid);
+        if (!f) { toast('Bitte zuerst die Förderung wählen.', 'fehler'); return; }
+        // Neu zugeordnet: Änderung für diese Förderung berechnen (alles, auch Vorschläge – du bestätigst ja)
+        const neu = fid !== p.foerderung_id ? O.aenderung(f, p.erkannt) : null;
+        const aend = neu ? peGesamt(neu.automatisch, neu.vorschlag) : peGesamt(p.status === 'vorschlag' ? {} : p.automatisch, p.vorschlag);
+        const patch = O.anwenden(f, aend);
+        const aendert = Object.keys(patch).some(k => JSON.stringify(patch[k]) !== JSON.stringify(f[k]));
+        const notizen = (neu || O.aenderung(f, p.erkannt)).notizen;
+        await Q.oemagAnwenden(p.id, aend, fid);
+        await laden(true);
+        toast(`${f.kunde}: ${aendert ? 'übernommen' : 'nichts geändert'}${notizen.length ? ' – ' + notizen.join(' · ') : ''}`, 'ok');
+      }
+      if (b.dataset.pe === 'einfuegen') {
+        const roh = $('#pe-text').value.trim();
+        if (!roh) { toast('Bitte zuerst eine Mail einfügen.', 'fehler'); return; }
+        const zeilen = roh.split('\n');
+        const betreff = zeilen[0].length <= 120 ? zeilen[0].trim() : '';
+        const text = betreff ? zeilen.slice(1).join('\n') : roh;
+        const r = O.verarbeiten({ betreff, text, datum: $('#pe-datum').value || heute() }, S.daten);
+        const hash = await sha256Text(betreff + '\n' + text);
+        const zeile = await Q.posteingangEinfuegen({
+          message_id: 'eingefuegt:' + hash, quelle: 'eingefuegt', empfangen_am: new Date().toISOString(), absender: '', betreff, text, sha256: hash,
+          art: r.erkannt.art, sicher: r.erkannt.sicher, erkannt: r.erkannt, foerderung_id: r.foerderung ? r.foerderung.id : null,
+          zuordnung: r.zuordnung, kandidaten: r.kandidaten, automatisch: r.automatisch, vorschlag: r.vorschlag, notizen: r.notizen,
+          status: r.status === 'angewendet' ? 'offen' : r.status
+        });
+        if (r.foerderung && Object.keys(r.automatisch).length) await Q.oemagAnwenden(zeile.id, r.automatisch);
+        await laden(true);
+        toast(`${r.erkannt.label}${r.foerderung ? ' → ' + r.foerderung.kunde : ' – keine Förderung gefunden'}${r.notizen.length ? ': ' + r.notizen.join(' · ') : ''}`, r.foerderung ? 'ok' : 'fehler');
+      }
+      await postDialog();
+    } catch (e) { toast(E.fehlerText(e), 'fehler'); }
+  }
+
+  // ---------------------------------------------------------------
+  // Sicherungen: jede Nacht automatisch (sql/archiv.sql + Edge Function foerder-taeglich).
+  // Hier: ansehen, als Excel holen, mit heute vergleichen, einzelne Förderungen zurückholen.
+  // ---------------------------------------------------------------
+  const kurzHash = h => h ? String(h).slice(0, 10) + '…' : '–';
+  async function sicherungenDialog() {
+    dialog('Sicherungen', '<p class="grau">wird geladen …</p>');
+    let liste;
+    try { liste = await Q.archivListe(); } catch (e) {
+      $('#dlg-inhalt').innerHTML = e.fehlt
+        ? `<p><b>Die tägliche Sicherung ist in der Datenbank noch nicht eingerichtet.</b></p>
+           <p>Einmal <span class="mono">sql/archiv.sql</span> im Supabase-Dashboard unter <b>SQL Editor</b> ausführen und die
+           Edge Function <span class="mono">foerder-taeglich</span> bereitstellen – Anleitung in <span class="mono">docs/EINSPIELEN.md</span>.</p>`
+        : `<p class="rot">${esc(E.fehlerText(e))}</p>`;
+      return;
+    }
+    const heuteDa = liste.some(a => a.tag === heute());
+    $('#dlg-inhalt').innerHTML = `<p>Jede Nacht wird die ganze Förderliste gesichert – unveränderbar, mit Prüfsumme, die mit der des Vortags verkettet ist.
+      Die Admins bekommen sie zusätzlich per Mail (CSV für Excel + JSON). Aufbewahrt werden alle Tage der letzten 90 Tage und danach jeder Monatserste.</p>
+      ${liste.length ? `<table class="mini-tabelle sich-tabelle"><thead><tr><th>Stand</th><th class="r">Förderungen</th><th>Prüfsumme</th><th>Datei · Mail</th><th></th></tr></thead><tbody>
+        ${liste.map(a => `<tr><td><b>${datumDE(a.tag)}</b><div class="klein grau">${new Date(a.erstellt_am).toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit' })} Uhr</div></td>
+          <td class="r">${a.anzahl}</td><td class="mono klein" title="${esc(a.sha256)}
+Vortag: ${esc(a.vorher_sha256 || '–')}">${esc(kurzHash(a.sha256))}</td>
+          <td class="klein">${a.datei ? '✓' : '<span class="grau">–</span>'} · ${a.versendet_am ? '✓' : '<span class="grau">–</span>'}</td>
+          <td class="r sich-knoepfe"><button class="btn btn-leise" data-sich="excel" data-tag="${a.tag}"><svg><use href="#i-download"/></svg>Excel</button>
+            <button class="btn btn-leise" data-sich="vergleich" data-tag="${a.tag}">Mit heute vergleichen</button></td></tr>`).join('')}
+        </tbody></table>` : '<p class="grau">Noch keine Sicherung vorhanden.</p>'}
+      <div id="sich-vergleich"></div>`;
+    $('#dlg-fuss').innerHTML = `${heuteDa ? '' : '<button class="btn" data-sich="jetzt"><svg><use href="#i-check"/></svg>Jetzt sichern</button>'}<button class="btn" data-aktion="dialog-zu">Schließen</button>`;
+  }
+  // Was ist seit der Sicherung anders? (ohne Zeitstempel)
+  function sicherungUnterschiede(alt) {
+    const ohne = d => { const x = Object.assign({}, d); delete x.geaendert_am; delete x.geaendert_von; delete x.erstellt_am; delete x.erstellt_von; return JSON.stringify(x, Object.keys(x).sort()); };
+    const jetzt = new Map(S.daten.map(d => [d.id, d]));
+    const aus = [];
+    alt.forEach(a => {
+      const d = jetzt.get(a.id);
+      if (!d) { aus.push({ a, art: 'gelöscht' }); return; }
+      if (ohne(a) === ohne(d)) return;
+      const felder = Object.keys(a).filter(k => !/^(geaendert|erstellt)_/.test(k) && JSON.stringify(a[k]) !== JSON.stringify(d[k]));
+      aus.push({ a, art: 'geändert', felder });
+    });
+    return aus;
+  }
+  async function sicherungAktion(b) {
+    const tag = b.dataset.tag;
+    try {
+      if (b.dataset.sich === 'jetzt') { await Q.archivJetzt(); toast('Gesichert.', 'ok'); return sicherungenDialog(); }
+      if (b.dataset.sich === 'excel') {
+        const alt = await Q.archivTag(tag);
+        return excelSpeichern(alt.filter(d => !d.geloescht_am).map(d => E.exportZeile(d, tag)), `EAG-Foerderungen_Sicherung_${tag}.xlsx`);
+      }
+      if (b.dataset.sich === 'vergleich') {
+        const unt = sicherungUnterschiede(await Q.archivTag(tag));
+        $('#sich-vergleich').innerHTML = `<h3 class="sich-titel">Seit ${datumDE(tag)} anders: ${unt.length || 'nichts'}</h3>
+          ${unt.length ? `<table class="mini-tabelle"><tbody>${unt.map(u => `<tr><td><b>${esc(u.a.kunde || '(ohne Namen)')}</b>
+            <div class="klein grau">${u.art === 'gelöscht' ? '<span class="rot">heute nicht mehr vorhanden</span>' : 'geändert: ' + esc(u.felder.map(k => FELD_LABEL[k] || k).join(', '))}</div></td>
+            <td class="r"><button class="btn btn-leise" data-sich="zurueck" data-tag="${tag}" data-id="${u.a.id}"><svg><use href="#i-restore"/></svg>Stand vom ${datumDE(tag)} zurückholen</button></td></tr>`).join('')}</tbody></table>` : ''}`;
+        return;
+      }
+      if (b.dataset.sich === 'zurueck') {
+        const alt = (await Q.archivTag(tag)).find(d => d.id === b.dataset.id);
+        if (!(await frage(`„${alt ? alt.kunde : ''}“ auf den Stand vom ${datumDE(tag)} zurücksetzen? Spätere Änderungen an dieser Förderung gehen verloren (im Verlauf bleiben sie sichtbar).`, 'Zurückholen', true))) return;
+        await Q.archivWiederherstellen(tag, b.dataset.id);
+        await laden(true);
+        toast('Zurückgeholt.', 'ok');
+        b.closest('tr').remove();
+      }
+    } catch (e) { toast(E.fehlerText(e), 'fehler'); }
+  }
+
   function dialog(titel, inhalt, fuss) {
     $('#dlg-titel').textContent = titel;
     $('#dlg-inhalt').innerHTML = inhalt;
@@ -991,24 +1303,10 @@
   function exportieren() {
     if (!window.XLSX) { toast('Excel-Modul lädt noch – bitte gleich nochmal.', 'fehler'); return; }
     const liste = sortiere(aktuelleListe());
-    const zeilen = liste.map(({ d, st }) => {
-      const z = {
-        'Jahr': d.jahr, 'Programm': d.programm, 'Fördercall': datumDE(d.foerdercall), 'Mitarbeiter': d.mitarbeiter, 'Ticket-Zieher': d.zieher,
-        'Kunde': d.kunde, 'Geb. Dat': datumDE(d.geburtsdatum), 'Vollmacht': d.vollmacht, 'Straße': d.strasse, 'PLZ': d.plz, 'Ort': d.ort,
-        'KG Grundstücksnummer': d.kg_gst, 'Einspeisezählpunkt': d.zaehlpunkt, 'Mail': d.mail, 'Projekt': d.projekt_nr,
-        'Größe kWp': d.kwp, 'Modulfläche m²': d.modulflaeche, 'Einspeisung': d.einspeisung, 'WR Nennleistung': d.wr_leistung,
-        'Speicher': d.speicher, 'Anbringung': d.anbringung, 'Zeitplan': d.zeitplan, 'Art': d.art, 'Ticket': d.ticket, 'FPJ': d.fpj
-      };
-      SCHRITTE.filter(s => !s.auto).forEach(s => { const w = (d.schritte || {})[s.key]; z[s.label] = w ? (w === '✓' ? '✓' : datumDE(w)) : ''; });
-      Object.keys(E.NEBEN).forEach(k => { const w = (d.schritte || {})[k]; z[E.NEBEN[k]] = w ? (E.istDatum(w) ? datumDE(w) : callsText(w)) : ''; });
-      const ew = st.ende ? (d.schritte || {})[st.ende.key] : '';
-      const fr = E.fristen(d, heute())[0];
-      z['Ergebnis'] = st.ende ? st.ende.label + (E.istDatum(ew) ? ' ' + datumDE(ew) : '') : '';
-      z['Nächster Schritt'] = st.fertig ? 'fertig' : st.ende ? '' : E.aufgabe(d, st).todo;
-      z['Nächste Frist'] = fr ? `${fr.label}: ${fr.datum ? datumDE(fr.datum) + (fr.geschaetzt ? ' (frühestens)' : '') : 'unbekannt'}` : '';
-      z['Offene Punkte'] = d.offene_punkte; z['Info'] = d.info;
-      return z;
-    });
+    excelSpeichern(liste.map(({ d }) => E.exportZeile(d, heute())), `EAG-Foerderungen_${heute()}.xlsx`);
+  }
+  function excelSpeichern(zeilen, dateiname) {
+    if (!window.XLSX) { toast('Excel-Modul lädt noch – bitte gleich nochmal.', 'fehler'); return; }
     const X = window.XLSX;
     const ws = X.utils.json_to_sheet(zeilen);
     const spalten = Object.keys(zeilen[0] || { Kunde: '' });
@@ -1016,7 +1314,7 @@
     ws['!autofilter'] = { ref: ws['!ref'] };
     const wb = X.utils.book_new();
     X.utils.book_append_sheet(wb, ws, 'Förderungen');
-    X.writeFile(wb, `EAG-Foerderungen_${heute()}.xlsx`);
+    X.writeFile(wb, dateiname);
   }
 
   // ---------------------------------------------------------------
@@ -1220,8 +1518,17 @@
         <div><b>${ab.gleich.length}</b><span>schon aktuell</span></div>
         <div><b>${a.doppelt}</b><span>Doppelte zusammengeführt</span></div>
       </div>
-      ${(() => { const n = ab.neu.filter(f => f._abgelehntIm).length + ab.ergaenzen.filter(e => e.neuAngesucht).length; const c = E.offenerCall(heute());
-        return n ? `<div class="imp-hinweise"><b><svg><use href="#i-restore"/></svg>${n} in der Liste orange markiert (abgelehnt)</b><ul><li>${c ? `Werden in den Call ${esc(datumDE(c))} übernommen: Ticket und Einreichung zurückgesetzt, Portal-Projekt bleibt.` : 'Kein Call mehr offen – sie werden als abgelehnt gespeichert.'}</li></ul></div>` : ''; })()}
+      ${(() => {
+        // Orange in der Excel = nochmal ansuchen. Alle erkannten Zeilen namentlich, damit man es gegenprüfen kann.
+        const orange = a.eintraege.filter(f => f._orange);
+        if (!orange.length) return '';
+        const umstellen = ab.neu.filter(f => f._orange).length + ab.ergaenzen.filter(e => e.neuAngesucht).length;
+        const c = E.offenerCall(heute());
+        return `<div class="imp-hinweise"><b><svg><use href="#i-restore"/></svg>${orange.length} Zeilen orange markiert → „Nochmal ansuchen“</b><ul>
+          <li>${c ? `${umstellen} kommen in den Call ${esc(datumDE(c))} (Ticket und Einreichung zurück, Portal-Projekt bleibt) und stehen als „Nochmal ansuchen“ in der Liste.${orange.length > umstellen ? ` ${orange.length - umstellen} sind schon so vermerkt.` : ''}` : 'Kein Call mehr offen – sie werden als abgelehnt gespeichert.'}</li>
+          <li>Erkannt wird jeder Orangeton – an der Kunden-Zelle oder an der halben Zeile. Fehlt hier jemand oder ist jemand zu viel: bitte melden.</li>
+          <li class="grau">${orange.map(f => esc(f.kunde)).join(' · ')}</li></ul></div>`;
+      })()}
       ${a.hinweise.length ? `<div class="imp-hinweise"><b><svg><use href="#i-alert"/></svg>Bitte nach dem Import prüfen (${a.hinweise.length})</b><ul>${a.hinweise.map(h => `<li>${esc(h)}</li>`).join('')}</ul></div>` : ''}
       <details class="imp-vorschau"><summary>Vorschau der neuen Einträge</summary>
         <table class="mini-tabelle"><thead><tr><th>Kunde</th><th>Jahr</th><th>Call</th><th>Zieher</th><th>Stand</th><th>aus</th></tr></thead><tbody>
@@ -1344,6 +1651,11 @@
         case 'export': exportieren(); break;
         case 'import': importDialog(); break;
         case 'nutzer': nutzerDialog(); break;
+        case 'sicherungen': sicherungenDialog(); break;
+        case 'posteingang': postDialog(); break;
+        case 'befehle': befehlspalette(); break;
+        case 'darstellung': darstellungWeiter(); break;
+        case 'tasten': tastenDialog(); break;
         case 'passwort': $('#nutzer-menue').hidden = true; passwortDialog(false); break;
         case 'abmelden': $('#nutzer-menue').hidden = true; await Q.abmelden(); S.ich = null; S.daten = []; zeige('login'); setzeLoginModus('anmelden'); break;
         case 'neu-laden': await laden(); toast('Aktualisiert.', 'ok'); break;
@@ -1369,7 +1681,12 @@
     });
     $('#reiter').addEventListener('click', e => {
       const x = e.target.closest('[data-extra]');
-      if (x) { S.extra = S.extra === x.dataset.extra ? '' : x.dataset.extra; S.aufgeklappt.clear(); zeichne(); return; }
+      if (x && x.dataset.extra === 'post') { postDialog(); return; }
+      if (x) {
+        S.extra = S.extra === x.dataset.extra ? '' : x.dataset.extra;
+        if (S.extra === 'abgelehnt') S.ansicht = 'beendet';
+        S.aufgeklappt.clear(); zeichne(); return;
+      }
       const b = e.target.closest('[data-ansicht]');
       if (!b) return;
       S.ansicht = b.dataset.ansicht; S.aufgeklappt.clear();
@@ -1396,6 +1713,15 @@
         S.filter.call = an ? E.naechsterTicketTag(heute()) || '' : '';
         fuelleFilter(); zeichne(); return;
       }
+      const tk = e.target.closest('.tk[data-id]');
+      if (tk) {
+        const d = S.daten.find(x => x.id === tk.dataset.id);
+        const kopie = e.target.closest('[data-kopie]');
+        if (kopie && d) { kopieren(kopie, KOPIER[+kopie.dataset.kopie][1](d)); return; }
+        if (e.target.closest('[data-tk-gezogen]')) { ticketGezogenSpeichern(tk.dataset.id, $('[data-tk-von]', tk).value); return; }
+        if (e.target.closest('[data-oeffnen-tk]') && d) { oeffne(d); return; }
+        return;
+      }
       const mehr = e.target.closest('[data-mehr]');
       if (mehr) { S.aufgeklappt.add(mehr.dataset.mehr); zeichne(); return; }
       const q = e.target.closest('[data-schnell]');
@@ -1404,12 +1730,25 @@
       if (e.target.closest('[data-neu-ansuchen]') && tr) { e.stopPropagation(); schnellNeuAnsuchen(tr.dataset.id); return; }
       if (tr) oeffne(S.daten.find(d => d.id === tr.dataset.id));
     });
+    $('#liste').addEventListener('change', e => {
+      const sel = e.target.closest('[data-tk-von]');
+      const tk = e.target.closest('.tk[data-id]');
+      const d = tk && S.daten.find(x => x.id === tk.dataset.id);
+      if (sel && d && gezogen(d) && sel.value) gezogenVonSpeichern(d.id, sel.value);
+    });
     $('#liste').addEventListener('submit', e => {
       if (e.target.id !== 'tt-form') return;
       e.preventDefault();
       ticketZieherSpeichern($('#tt-namen').value);
     });
     $('#liste').addEventListener('keydown', e => {
+      const tk = e.target.closest('.tk[data-id]');
+      if (tk && /^[1-7]$/.test(e.key) && !e.ctrlKey && !e.metaKey && e.target.tagName !== 'SELECT') {
+        const d = S.daten.find(x => x.id === tk.dataset.id);
+        const knopf = $(`[data-kopie="${+e.key - 1}"]`, tk);
+        if (d && knopf && !knopf.disabled) { e.preventDefault(); kopieren(knopf, KOPIER[+e.key - 1][1](d)); }
+        return;
+      }
       const tr = e.target.closest('tr[data-id], .zeile[data-id], .z[data-id]');
       if (tr && e.key === 'Enter' && e.target === tr) oeffne(S.daten.find(d => d.id === tr.dataset.id));
     });
@@ -1437,7 +1776,8 @@
       }
       const b = e.target.closest('[data-jetzt]');
       if (!b || !S.detail) return;
-      S.detail.rec.schritte = Object.assign({}, S.detail.rec.schritte, { [b.dataset.jetzt]: heute() });
+      if (b.dataset.jetzt === 'ticket') Object.assign(S.detail.rec, E.ticketGezogen(S.detail.rec, S.detail.rec.zieher, heute(), ticketUhrzeit(S.detail.rec)));
+      else S.detail.rec.schritte = Object.assign({}, S.detail.rec.schritte, { [b.dataset.jetzt]: heute() });
       speichern();
     });
     $('#detail').addEventListener('click', e => {
@@ -1449,6 +1789,10 @@
     $('#dialog').addEventListener('change', e => {
       if (e.target.id === 'imp-datei' && e.target.files[0]) importDatei(e.target.files[0]);
       else if (e.target.id === 'w-call' || e.target.id === 'w-alle') wuerfelAnzahl();
+      else if (e.target.dataset.peWahl) {
+        const k = $(`[data-pe="uebernehmen"][data-id="${e.target.dataset.peWahl}"]`);
+        if (k) k.disabled = !e.target.value;
+      }
       else nutzerAendern(e);
     });
     $('#dialog').addEventListener('click', e => {
@@ -1458,9 +1802,13 @@
       else if (e.target.closest('#w-excel')) wuerfelExcel();
       else if (e.target.closest('#w-uebernehmen')) wuerfelUebernehmen();
       else if (e.target.closest('#pw-los')) passwortSpeichern();
+      else if (e.target.closest('[data-sich]')) sicherungAktion(e.target.closest('[data-sich]'));
+      else if (e.target.closest('[data-pe]')) postAktion(e.target.closest('[data-pe]'));
       else nutzerAktion(e);
     });
 
+    document.addEventListener('keydown', tastatur);
+    $('#toast').addEventListener('click', e => { if (e.target.closest('[data-rueckgaengig]')) rueckgaengigMachen(); });
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
         if (!$('#dialog').hidden) dialogZu();
@@ -1477,9 +1825,163 @@
   }
 
   // ---------------------------------------------------------------
+  // Darstellung: automatisch (System) · hell · dunkel
+  // ---------------------------------------------------------------
+  const DARSTELLUNG = { auto: 'automatisch', hell: 'hell', dunkel: 'dunkel' };
+  function darstellungSetzen(modus) {
+    modus = DARSTELLUNG[modus] ? modus : 'auto';
+    speicherLokal.schreiben('theme', modus);
+    if (modus === 'auto') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = modus === 'hell' ? 'light' : 'dark';
+    const t = $('#darstellung-text');
+    if (t) t.textContent = 'Darstellung: ' + DARSTELLUNG[modus];
+  }
+  const darstellungWeiter = () => darstellungSetzen({ auto: 'hell', hell: 'dunkel', dunkel: 'auto' }[speicherLokal.lesen('theme', 'auto')] || 'auto');
+
+  // ---------------------------------------------------------------
+  // Befehlspalette (⌘K / Strg+K): Förderung finden, nächsten Schritt erledigen, Befehle
+  // ---------------------------------------------------------------
+  const BP = { el: null, idx: 0, eintraege: [] };
+  const norm = t => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  function bpBefehle() {
+    const ansicht = (k, t) => ({ gruppe: 'Befehle', icon: 'i-filter', titel: 'Ansicht: ' + t, tun: () => { S.ansicht = k; S.aufgeklappt.clear(); zeichne(); } });
+    return [
+      darf('bearbeiten') && { gruppe: 'Befehle', icon: 'i-plus', titel: 'Neuer Kunde', taste: 'N', tun: () => oeffne(null) },
+      ansicht('todo', 'Zu tun'), ansicht('warten', 'Wartet'), ansicht('fertig', 'Fertig'), ansicht('beendet', 'Beendet'), ansicht('alle', 'Alle (Tabelle)'),
+      { gruppe: 'Befehle', icon: 'i-download', titel: 'Als Excel herunterladen', tun: exportieren },
+      darf('admin') && { gruppe: 'Befehle', icon: 'i-history', titel: 'Sicherungen', tun: sicherungenDialog },
+      darf('bearbeiten') && { gruppe: 'Befehle', icon: 'i-doc', titel: 'OeMAG-Posteingang (Mail einfügen)', tun: postDialog },
+      darf('admin') && { gruppe: 'Befehle', icon: 'i-users', titel: 'Nutzer & Rollen', tun: nutzerDialog },
+      darf('admin') && { gruppe: 'Befehle', icon: 'i-upload', titel: 'Excel-Import', tun: importDialog },
+      { gruppe: 'Befehle', icon: 'i-sun', titel: 'Darstellung wechseln (automatisch → hell → dunkel)', tun: darstellungWeiter },
+      { gruppe: 'Befehle', icon: 'i-refresh', titel: 'Aktualisieren', tun: () => laden() },
+      { gruppe: 'Befehle', icon: 'i-bolt', titel: 'Tastenkürzel', taste: '?', tun: tastenDialog }
+    ].filter(Boolean);
+  }
+  function bpSuchen(q) {
+    const teile = norm(q).split(/\s+/).filter(Boolean);
+    const bearbeiten = darf('bearbeiten');
+    const text = d => norm([d.kunde, d.ort, d.plz, d.zaehlpunkt, d.projekt_nr, d.fpj, d.eag_nr, d.ticket, d.zieher, d.mitarbeiter].join(' '));
+    const RANG = { ueberfaellig: 0, dringend: 1, bald: 2, ruhig: 3, unbekannt: 4 };
+    const fr = d => E.fristen(d, heute())[0];
+    let treffer = S.daten.filter(d => !d.geloescht_am);
+    if (teile.length) treffer = treffer.filter(d => { const t = text(d); return teile.every(x => t.includes(x)); });
+    else treffer = treffer.filter(d => { const f = fr(d); return f && RANG[f.stufe] <= RANG.dringend; });
+    treffer.sort((a, b) => { const fa = fr(a), fb = fr(b); return (fa ? RANG[fa.stufe] : 9) - (fb ? RANG[fb.stufe] : 9) || (a.kunde || '').localeCompare(b.kunde || '', 'de'); });
+    const aus = [];
+    treffer.slice(0, 8).forEach((d, i) => {
+      const st = E.status(d), n = E.aufgabe(d, st), f = fr(d);
+      aus.push({ gruppe: teile.length ? 'Förderungen' : 'Dringend', icon: 'i-doc', titel: d.kunde || '(ohne Namen)',
+        sub: [[d.plz, d.ort].filter(Boolean).join(' '), d.kwp ? zahlDE(d.kwp) + ' kWp' : '', st.fertig ? 'ausgezahlt' : st.ende ? st.ende.label : n ? n.todo : ''].filter(Boolean).join(' · '),
+        rechts: f && f.datum ? `bis ${datumDE(f.datum).slice(0, 6)}` : '', tun: () => oeffne(d) });
+      if (bearbeiten && n && !n.auto && i < 3 && teile.length) {
+        aus.push({ gruppe: 'Aktionen', icon: 'i-check', ok: true, titel: `${d.kunde}: ${n.knopf}`, sub: 'Nächsten Schritt heute erledigen – mit Rückgängig', taste: 'E',
+          tun: () => n.neben ? oeffne(d) : schnellErledigt(d.id, n.key) });
+      }
+    });
+    const befehle = bpBefehle().filter(b => !teile.length || teile.every(x => norm(b.titel).includes(x)));
+    return aus.filter(x => x.gruppe !== 'Aktionen').concat(aus.filter(x => x.gruppe === 'Aktionen'), befehle);
+  }
+  function bpZeichnen() {
+    const q = $('#bp-q').value;
+    BP.eintraege = bpSuchen(q);
+    BP.idx = Math.min(BP.idx, Math.max(0, BP.eintraege.length - 1));
+    let gruppe = '';
+    $('#bp-liste').innerHTML = BP.eintraege.length ? BP.eintraege.map((x, i) => {
+      const kopf = x.gruppe !== gruppe ? `<div class="bp-gruppe">${esc(gruppe = x.gruppe)}</div>` : '';
+      return kopf + `<button type="button" class="bp-eintrag ${i === BP.idx ? 'aktiv' : ''}" data-bp="${i}" role="option" aria-selected="${i === BP.idx}">
+        <svg class="${x.ok ? 'ok' : ''}"><use href="#${x.icon}"/></svg><span class="bp-text"><b>${esc(x.titel)}</b>${x.sub ? `<small>${esc(x.sub)}</small>` : ''}</span>
+        <span class="bp-rechts">${x.rechts ? esc(x.rechts) : ''}${x.taste ? `<kbd>${esc(x.taste)}</kbd>` : ''}</span></button>`;
+    }).join('') : `<div class="bp-leer">Nichts gefunden für „${esc(q)}“.</div>`;
+    const a = $('.bp-eintrag.aktiv', BP.el);
+    if (a) a.scrollIntoView({ block: 'nearest' });
+  }
+  function befehlspalette() {
+    if (BP.el) { $('#bp-q').select(); return; }
+    BP.idx = 0;
+    BP.el = document.createElement('div');
+    BP.el.className = 'bp';
+    BP.el.innerHTML = `<div class="bp-box" role="dialog" aria-modal="true" aria-label="Suchen und Befehle">
+      <label class="bp-feld"><svg><use href="#i-search"/></svg><input id="bp-q" placeholder="Kunde, Ort, Zählpunkt, FPJ … oder Befehl" autocomplete="off" spellcheck="false" role="combobox" aria-controls="bp-liste"><kbd>Esc</kbd></label>
+      <div class="bp-liste" id="bp-liste" role="listbox"></div>
+      <div class="bp-fuss"><span><kbd>↑</kbd><kbd>↓</kbd> wählen</span><span><kbd>↵</kbd> ausführen</span><span><kbd>Esc</kbd> schließen</span></div></div>`;
+    document.body.appendChild(BP.el);
+    const q = $('#bp-q');
+    q.addEventListener('input', () => { BP.idx = 0; bpZeichnen(); });
+    q.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        BP.idx = (BP.idx + (e.key === 'ArrowDown' ? 1 : -1) + BP.eintraege.length) % Math.max(1, BP.eintraege.length);
+        bpZeichnen();
+      } else if (e.key === 'Enter') { e.preventDefault(); bpAusfuehren(BP.idx); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); bpZu(); }
+    });
+    BP.el.addEventListener('mousemove', e => { const b = e.target.closest('[data-bp]'); if (b && +b.dataset.bp !== BP.idx) { BP.idx = +b.dataset.bp; $$('.bp-eintrag', BP.el).forEach((x, i) => x.classList.toggle('aktiv', i === BP.idx)); } });
+    BP.el.addEventListener('click', e => { const b = e.target.closest('[data-bp]'); if (b) bpAusfuehren(+b.dataset.bp); else if (e.target === BP.el) bpZu(); });
+    bpZeichnen();
+    q.focus();
+  }
+  function bpZu() { if (BP.el) { BP.el.remove(); BP.el = null; } }
+  function bpAusfuehren(i) {
+    const x = BP.eintraege[i];
+    if (!x) return;
+    bpZu();
+    x.tun();
+  }
+
+  // ---------------------------------------------------------------
+  // Tastatur – jede Taste hat auch einen sichtbaren Knopf
+  // ---------------------------------------------------------------
+  const TASTEN = [
+    [['⌘', 'K'], 'Suchen und Befehle'], [['/'], 'Liste filtern'], [['J'], 'nächste Förderung'], [['K'], 'vorige Förderung'],
+    [['↵'], 'Akte öffnen'], [['E'], 'nächsten Schritt heute erledigen (mit Rückgängig)'], [['N'], 'neuer Kunde'],
+    [['⌘', 'S'], 'Akte speichern'], [['⌘', 'Z'], 'letztes Erledigen rückgängig'], [['Esc'], 'schließen'], [['1', '–', '7'], 'Ticket-Tag: Feld kopieren'], [['?'], 'diese Übersicht']
+  ];
+  function tastenDialog() {
+    dialog('Tastenkürzel', `<div class="tasten">${TASTEN.map(([k, t]) => `<span>${k.map(x => x === '–' ? '–' : `<kbd>${esc(x)}</kbd>`).join('')}</span><span>${esc(t)}</span>`).join('')}</div>`);
+  }
+  const ZEILEN = '.z[data-id], .tabelle tbody tr[data-id], .tk[data-id]';
+  function zeileWechseln(schritt) {
+    if (S.detail) {
+      const ids = $$('.z[data-id], .tabelle tbody tr[data-id]').map(x => x.dataset.id).filter((x, i, a) => a.indexOf(x) === i);
+      const i = ids.indexOf(S.detail.rec.id);
+      const ziel = ids[i + schritt];
+      if (!ziel) return;
+      if (Object.keys(aenderungen()).length) { toast('Erst speichern (⌘S) oder Änderungen verwerfen.', 'fehler'); return; }
+      oeffne(S.daten.find(d => d.id === ziel));
+      return;
+    }
+    const zeilen = $$(ZEILEN);
+    if (!zeilen.length) return;
+    const i = zeilen.indexOf(document.activeElement.closest && document.activeElement.closest(ZEILEN));
+    const ziel = zeilen[i < 0 ? 0 : Math.max(0, Math.min(zeilen.length - 1, i + schritt))];
+    ziel.focus(); ziel.scrollIntoView({ block: 'nearest' });
+  }
+  function tastatur(e) {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); if (S.ich) befehlspalette(); return; }
+    if (BP.el) return;
+    const tippt = e.target.closest && e.target.closest('input, textarea, select, [contenteditable]');
+    if (mod && e.key.toLowerCase() === 'z' && !tippt && rueckgaengigFn) { e.preventDefault(); rueckgaengigMachen(); return; }
+    if (tippt || mod || e.altKey || !S.ich || !$('#dialog').hidden || document.querySelector('.overlay-frage')) return;
+    const k = e.key;
+    if (k === '/' && !S.detail) { e.preventDefault(); $('#f-suche').focus(); }
+    else if (k === '?') { e.preventDefault(); tastenDialog(); }
+    else if (k === 'j' || k === 'k') { e.preventDefault(); zeileWechseln(k === 'j' ? 1 : -1); }
+    else if (k === 'n' && darf('bearbeiten') && !S.detail) { e.preventDefault(); oeffne(null); }
+    else if (k === 'e' && darf('bearbeiten')) {
+      if (S.detail) { const b = $('#d-inhalt [data-jetzt]'); if (b) { e.preventDefault(); b.click(); } return; }
+      const z = document.activeElement.closest && document.activeElement.closest(ZEILEN);
+      const b = z && (z.querySelector('[data-schnell]') || z.querySelector('[data-tk-gezogen]'));
+      if (b) { e.preventDefault(); b.click(); }
+    }
+  }
+
+  // ---------------------------------------------------------------
   // Start
   // ---------------------------------------------------------------
   async function start() {
+    darstellungSetzen(speicherLokal.lesen('theme', 'auto'));
     verbinden();
     if (Q.demo) document.body.classList.add('demo');
     Q.onAuth((ev, session) => {

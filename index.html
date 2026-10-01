@@ -4,13 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex, nofollow">
-  <meta name="theme-color" content="#1f2a1a">
+  <meta name="theme-color" content="#F7F7F8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0B0B0C" media="(prefers-color-scheme: dark)">
+  <script>try { var t = localStorage.getItem('eag_theme'); if (t === '"hell"') document.documentElement.dataset.theme = 'light'; else if (t === '"dunkel"') document.documentElement.dataset.theme = 'dark'; } catch (e) {}</script>
   <title>EAG-Förderungen · SOLPRO</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2393BD14'/%3E%3Cpath d='M8 21l6-6 4 4 7-8' stroke='%23fff' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/app.css?v=12">
+  <link rel="stylesheet" href="css/app.css?v=22">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -74,6 +76,7 @@
     <header class="kopf">
       <div class="marke"><span class="marke-zeichen"><svg><use href="#i-sun"/></svg></span><span><b>SOLPRO</b> <span class="marke-sub">EAG-Förderungen</span></span></div>
       <div class="kopf-aktionen">
+        <button class="befehl-knopf" data-aktion="befehle" title="Suchen und Befehle (⌘K / Strg+K)"><svg><use href="#i-search"/></svg><span>Suchen oder Befehl …</span><kbd>⌘K</kbd></button>
         <button class="btn btn-kopf btn-kopf-haupt" data-aktion="neu" data-recht="bearbeiten"><svg><use href="#i-plus"/></svg><span>Neuer Kunde</span></button>
         <button class="btn btn-kopf" data-aktion="import" data-recht="admin" title="Excel-Liste importieren"><svg><use href="#i-upload"/></svg><span>Excel-Import</span></button>
         <div class="kopf-nutzer">
@@ -82,6 +85,12 @@
             <div class="menue-info"><b id="nutzer-name"></b><span id="nutzer-mail" class="grau"></span><span class="rolle" id="nutzer-rolle"></span></div>
             <button class="menue-punkt" data-aktion="export"><svg><use href="#i-download"/></svg>Als Excel herunterladen</button>
             <button class="menue-punkt" data-aktion="nutzer" data-recht="admin"><svg><use href="#i-users"/></svg>Nutzer &amp; Rollen</button>
+            <button class="menue-punkt" data-aktion="sicherungen" data-recht="admin"><svg><use href="#i-history"/></svg>Sicherungen</button>
+            <button class="menue-punkt" data-aktion="posteingang" data-recht="bearbeiten"><svg><use href="#i-doc"/></svg>OeMAG-Posteingang</button>
+            <div class="menue-trenner"></div>
+            <button class="menue-punkt" data-aktion="darstellung"><svg><use href="#i-sun"/></svg><span id="darstellung-text">Darstellung: automatisch</span></button>
+            <button class="menue-punkt" data-aktion="tasten"><svg><use href="#i-bolt"/></svg>Tastenkürzel <kbd style="margin-left:auto">?</kbd></button>
+            <div class="menue-trenner"></div>
             <button class="menue-punkt" data-aktion="neu-laden"><svg><use href="#i-refresh"/></svg>Aktualisieren</button>
             <button class="menue-punkt" data-aktion="passwort"><svg><use href="#i-user"/></svg>Passwort ändern</button>
             <button class="menue-punkt" data-aktion="abmelden"><svg><use href="#i-logout"/></svg>Abmelden</button>
@@ -150,9 +159,10 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
   <script src="js/config.js?v=1"></script>
-  <script src="js/ablauf.js?v=3"></script>
-  <script src="js/daten.js?v=7"></script>
-  <script src="js/import.js?v=2"></script>
-  <script src="js/app.js?v=11"></script>
+  <script src="js/ablauf.js?v=9"></script>
+  <script src="js/oemag.js?v=2"></script>
+  <script src="js/daten.js?v=10"></script>
+  <script src="js/import.js?v=3"></script>
+  <script src="js/app.js?v=22"></script>
 </body>
 </html>

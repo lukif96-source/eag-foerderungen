@@ -51,3 +51,36 @@ test('Nachhaken erfindet nie neue Schritte und kein Ticket aus der Portal-Nummer
   I.vorherigeAbhaken(nurProjekt);
   assert.deepEqual(nurProjekt, { projekt: '✓' });
 });
+
+// ── Orange in der Excel = nochmal ansuchen ────────────────────────
+test('Orange-Erkennung über den Farbton: alle Orangetöne ja, Gelb/Grün/Rot/Grau nein', () => {
+  ['FF572F', 'FFC000', 'ED7D31', 'F4B084', 'F8CBAD', 'FFA500', 'FF9900', 'C65911', 'FBE2D5'].forEach(h => assert.equal(I.istOrange(h), true, h));
+  ['92D050', 'FFFF00', 'FF0000', 'C00000', 'D9D9D9', 'FFFFFF', '000000', '4472C4', 'FFF2CC', 'FFE699', 'FFD966'].forEach(h => assert.equal(I.istOrange(h), false, h));
+  assert.equal(I.fuellfarbe({ s: { fgColor: { rgb: 'FFFF572F' } } }), 'FF572F');      // ARGB
+  assert.equal(I.istOrange(I.fuellfarbe({ s: { fgColor: { theme: 5 } } })), true);    // Designfarbe Akzent 2
+});
+
+test('Orange ohne Call-Datum: trotzdem nochmal ansuchen im offenen Call', () => {
+  const p = I.nochmalAnsuchen({ jahr: 2025, foerdercall: null, schritte: { projekt: '✓', ticket: '✓', eingereicht: '✓' } }, '2026-10-01');
+  assert.equal(p.foerdercall, '2026-10-08');
+  assert.equal(p.jahr, 2026);
+  assert.equal(p.schritte.nochmal_ansuchen, '✓');
+  assert.equal(p.schritte.ticket, undefined);
+  assert.equal(p.schritte.projekt, '✓');
+  assert.equal(window.EAG.nochmal({ schritte: p.schritte }), true);
+});
+
+test('Orange, in der App schon importiert ohne Vermerk: beim erneuten Import nachgeholt', () => {
+  const bestand = Object.assign(alt(), { foerdercall: null, schritte: { projekt: '✓' } });
+  const ausListe = Object.assign(alt(), { id: undefined, _orange: true, foerdercall: '2026-10-08', schritte: { projekt: '✓', nochmal_ansuchen: '✓' } });
+  const { ergaenzen } = I.abgleich([ausListe], [bestand], '2026-10-01');
+  assert.equal(ergaenzen[0].neuAngesucht, true);
+  assert.equal(ergaenzen[0].patch.schritte.nochmal_ansuchen, '✓');
+  assert.equal(ergaenzen[0].patch.foerdercall, '2026-10-08');
+});
+
+test('Zählpunkt fürs Ticket ohne AT', () => {
+  assert.equal(window.EAG.zpFuersTicket('AT0030000000000000000000000000123'), '0030000000000000000000000000123');
+  assert.equal(window.EAG.zpFuersTicket('at 00300 00000000000000000000000123'), '0030000000000000000000000000123');
+  assert.equal(window.EAG.zpFuersTicket('0030000000000000000000000000123'), '0030000000000000000000000000123');
+});

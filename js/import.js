@@ -106,6 +106,37 @@
 
   function istHexTicket(t) { return /^[0-9a-f]{4,12}$/i.test(t); }
 
+  // Füllfarbe einer Zelle → Farbton. Orange = Farbton 8–47° (Orange-Rot FF572F bis Excel-„Orange“ FFC000,
+  // auch helle Varianten), kräftig genug gesättigt. Gelb, Grün, Rot, Grau zählen nicht.
+  // Designfarben ohne RGB: „Akzent 2“ (5) und „Akzent 4“ (7) sind im Office-Design orange.
+  function fuellfarbe(zelle) {
+    const c = zelle && zelle.s && (zelle.s.fgColor || zelle.s.bgColor);
+    if (!c) return null;
+    if (c.rgb && /^([0-9A-F]{2})?[0-9A-F]{6}$/i.test(c.rgb)) return c.rgb.slice(-6).toUpperCase();
+    if (c.theme === 5) return 'ED7D31';
+    if (c.theme === 7) return 'FFC000';
+    return null;
+  }
+  function istOrange(hex) {
+    if (!hex) return false;
+    const [r, g, b] = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+    if (d === 0) return false;
+    const sat = d / (1 - Math.abs(2 * l - 1));
+    let h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    h = (h * 60 + 360) % 360;
+    // nahe Gelb (über 35°) nur kräftig: FFC000 ja, blasses Gold FFF2CC / FFE699 nein
+    return h >= 8 && h <= 47 && sat >= 0.5 && l >= 0.3 && l <= 0.93 && (h <= 35 || l <= 0.6);
+  }
+  // Zeile orange markiert? Kunden-Zelle orange – oder mindestens die Hälfte der gefüllten Zellen (mind. 2)
+  function zeileOrange(ws, zi, spB, gefuellt) {
+    const X = window.XLSX;
+    const farbe = c => fuellfarbe(ws[X.utils.encode_cell({ r: zi, c })]);
+    if (istOrange(farbe(spB))) return true;
+    const orange = gefuellt.filter(c => istOrange(farbe(c))).length;
+    return orange >= 2 && orange * 2 >= gefuellt.length;
+  }
+
   function kopfZeile(zeilen) {
     for (let i = 0; i < Math.min(zeilen.length, 12); i++) {
       const r = zeilen[i] || [];
@@ -222,12 +253,11 @@
       const zelle = ws[window.XLSX.utils.encode_cell({ r: zi, c: spB })];
       const farbe = zelle && zelle.s && zelle.s.fgColor && zelle.s.fgColor.rgb;
       if (farbe && /92D050$/i.test(farbe) && !f.schritte.vertrag_erhalten) f.schritte.vertrag_erhalten = '✓';
-      // orange-rot (FF572F) = in diesem Call abgelehnt → neu ansuchen (solange ein Call offen ist)
-      if (farbe && /FF572F$/i.test(farbe) && f.foerdercall) {
-        f._abgelehntIm = f.foerdercall;
-        delete f.schritte.ticket; delete f.schritte.eingereicht;
-        if (offenerCall(heute)) Object.assign(f, neuAnsuchen(f, heute));
-        else f.schritte.abgelehnt = '✓';
+      // Orange (jeder Orangeton, ganze Zeile geprüft) = abgelehnt → nochmal ansuchen im offenen Call
+      if (zeileOrange(ws, zi, spB, gefuellt)) {
+        f._orange = true;
+        f._abgelehntIm = f.foerdercall || null;
+        Object.assign(f, nochmalAnsuchen(f, heute));
       }
       f.info = notizen.filter(Boolean).join(' · ');
       f.offene_punkte = punkte.filter(Boolean).join(' · ');
@@ -237,6 +267,22 @@
       recs.push(f);
     }
     return { name, versteckt, zuteilung, jahr, recs, hinweise };
+  }
+
+  // Orange markiert: in den offenen Call (Ticket/Einreichung zurück) und als „nochmal ansuchen“ vermerken.
+  // Kennt die Liste den alten Call, steht er im Verlauf; ist kein Call mehr offen: abgelehnt.
+  function nochmalAnsuchen(f, heute) {
+    const call = offenerCall(heute);
+    const s = Object.assign({}, f.schritte || {});
+    if (!call) { s.abgelehnt = s.abgelehnt || '✓'; return { schritte: s }; }
+    if (f.foerdercall && f.foerdercall !== call) {
+      const p = neuAnsuchen(Object.assign({}, f, { schritte: s }), heute);
+      p.schritte.nochmal_ansuchen = '✓';
+      return p;
+    }
+    ['ticket', 'ticket_uhrzeit', 'eingereicht', 'abgelehnt', 'nachforderung', 'nachgereicht'].forEach(k => { delete s[k]; });
+    s.nochmal_ansuchen = '✓';
+    return { foerdercall: call, jahr: +call.slice(0, 4), ticket: '', schritte: s };
   }
 
   const TEXTFELDER = ['programm', 'art', 'mitarbeiter', 'zieher', 'kunde', 'vollmacht', 'strasse', 'plz', 'ort', 'kg_gst', 'zaehlpunkt', 'mail',
@@ -323,12 +369,15 @@
       if (!t) { neu.push(f); return; }
       const patch = ergaenze(t, f);
       let neuAngesucht = false;
-      // In der Liste orange (abgelehnt), in der App noch im alten Call: Ticket/Einreichung zurück,
-      // in den offenen Call. Nur einmal – steht der Eintrag schon im neuen Call, bleibt er.
-      if (f._abgelehntIm && t.foerdercall === f._abgelehntIm && !(t.schritte || {}).frueher_abgelehnt) {
-        const basis = Object.assign({}, t, patch, { schritte: Object.assign({}, t.schritte || {}, patch.schritte || {}) });
-        if (offenerCall(heute)) Object.assign(patch, neuAnsuchen(basis, heute));
-        else patch.schritte = Object.assign({}, basis.schritte, { abgelehnt: '✓' });
+      // In der Liste orange (abgelehnt), in der App noch nicht als „nochmal ansuchen“: in den offenen Call,
+      // Ticket/Einreichung zurück. Nur einmal – ist der Eintrag schon vermerkt, bleibt er, wie er ist.
+      const ts = t.schritte || {};
+      if ((f._orange || f._abgelehntIm) && !ts.frueher_abgelehnt && !ts.nochmal_ansuchen) {
+        const basis = Object.assign({}, t, patch, { schritte: Object.assign({}, ts, patch.schritte || {}) });
+        const call = offenerCall(heute);
+        // schon im offenen Call und Ticket gezogen: nur vermerken, nichts zurücksetzen
+        if (call && basis.foerdercall === call && basis.schritte.ticket) patch.schritte = Object.assign({}, basis.schritte, { nochmal_ansuchen: '✓' });
+        else Object.assign(patch, nochmalAnsuchen(basis, heute));
         neuAngesucht = true;
       }
       if (Object.keys(patch).length) ergaenzen.push({ ziel: t, patch, quelle: f, neuAngesucht });
@@ -343,5 +392,5 @@
     return r;
   }
 
-  window.EAG_IMPORT = { analysiere, abgleich, sauber, ergaenze, vorherigeAbhaken };
+  window.EAG_IMPORT = { analysiere, abgleich, sauber, ergaenze, vorherigeAbhaken, istOrange, fuellfarbe, nochmalAnsuchen };
 })();
