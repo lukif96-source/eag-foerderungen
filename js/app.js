@@ -63,7 +63,7 @@
     sort: speicherLokal.lesen('sort', { k: 'call', auf: true }),
     detail: null, geladenUm: 0,
     extra: '',
-    ansicht: ['offen', 'fertig', 'beendet', 'alle'].includes(speicherLokal.lesen('ansicht', 'offen')) ? speicherLokal.lesen('ansicht', 'offen') : 'offen', aufgeklappt: new Set()
+    ansicht: ['todo', 'warten', 'fertig', 'beendet', 'alle'].includes(speicherLokal.lesen('ansicht', 'todo')) ? speicherLokal.lesen('ansicht', 'todo') : 'todo', aufgeklappt: new Set(), phase: ''
   };
   S.filter.suche = '';
   S.filter.papierkorb = false;
@@ -262,8 +262,12 @@
   }
 
   // Ansicht: "todo" = wir sind dran, "warten" = Förderstelle/Kunde ist dran, "fertig", "alle"
-  function kategorie(st) {
-    return st.ende ? 'beendet' : st.fertig ? 'fertig' : 'offen';
+  // Ansicht eines Eintrags: wir sind dran (todo), die Förderstelle ist dran (warten), fertig, beendet
+  function kategorie(st, d) {
+    if (st.ende) return 'beendet';
+    if (st.fertig) return 'fertig';
+    const a = d ? E.aufgabe(d, st) : null;
+    return a && a.warten ? 'warten' : 'todo';
   }
 
   const hatOffenePunkte = x => !!(x.d.offene_punkte || '').trim();
@@ -278,16 +282,11 @@
 
   function aktuelleListe() {
     return S.daten.filter(passtBasis).map(d => ({ d, st: E.status(d) }))
-      .filter(x => S.ansicht === 'alle' || kategorie(x.st) === S.ansicht).filter(passtExtra);
+      .filter(x => S.ansicht === 'alle' || kategorie(x.st, x.d) === S.ansicht).filter(passtExtra)
+      .filter(x => !S.phase || ['todo', 'warten'].indexOf(S.ansicht) < 0 || (E.aufgabe(x.d, x.st) || {}).phase === S.phase);
   }
 
-  function zeichneExtra(liste) {
-    const n = { frist: liste.filter(fristBald).length, offen: liste.filter(hatOffenePunkte).length, datenfehlen: liste.filter(fehltDaten).length };
-    if (S.extra && !n[S.extra]) S.extra = '';
-    const k = (key, titel, icon) => `<button class="extra-knopf extra-${key} ${S.extra === key ? 'aktiv' : ''} ${n[key] ? '' : 'leer'}" data-extra="${key}">
-      <svg><use href="#${icon}"/></svg><b>${n[key]}</b><span>${titel}</span>${S.extra === key ? '<span class="extra-zu">alle anzeigen ✕</span>' : ''}</button>`;
-    $('#extra-filter').innerHTML = k('frist', 'Fristen in 30 Tagen', 'i-history') + k('offen', 'Offene Punkte', 'i-flag') + k('datenfehlen', 'Daten fehlen noch', 'i-alert');
-  }
+  function zeichneExtra() { /* Alarme stehen jetzt in der Ansicht-Leiste (zeichneReiter) */ }
 
   // ---------------------------------------------------------------
   // Übersicht zeichnen
@@ -295,9 +294,10 @@
   function zeichne() {
     const basis = S.daten.filter(passtBasis).map(d => ({ d, st: E.status(d) }));
     zeichneReiter(basis);
-    const inAnsicht = basis.filter(x => S.ansicht === 'alle' || kategorie(x.st) === S.ansicht);
-    zeichneExtra(inAnsicht);
-    const liste = inAnsicht.filter(passtExtra);
+    const inAnsicht = basis.filter(x => S.ansicht === 'alle' || kategorie(x.st, x.d) === S.ansicht);
+    zeichnePhasen(inAnsicht);
+    const liste = inAnsicht.filter(passtExtra)
+      .filter(x => !S.phase || ['todo', 'warten'].indexOf(S.ansicht) < 0 || (E.aufgabe(x.d, x.st) || {}).phase === S.phase);
     if (S.ansicht === 'alle') zeichneListe(sortiere(liste), basis.length);
     else zeichneGruppen(liste);
     const f = S.filter;
@@ -309,12 +309,27 @@
     speicherLokal.schreiben('ansicht', S.ansicht);
   }
 
+  // Ansicht-Leiste: links die Ansichten, rechts nur die Alarme
   function zeichneReiter(basis) {
-    const n = { offen: 0, fertig: 0, beendet: 0, alle: basis.length };
-    basis.forEach(x => { n[kategorie(x.st)]++; });
-    const r = (k, titel, sub) => `<button class="reiter-knopf ${S.ansicht === k ? 'aktiv' : ''}" data-ansicht="${k}">
-      <b>${n[k]}</b><span>${titel}</span><small>${sub}</small></button>`;
-    $('#reiter').innerHTML = r('offen', 'Offen', 'noch nicht ausgezahlt') + r('fertig', 'Fertig', 'ausgezahlt') + r('beendet', 'Beendet', 'abgelehnt, zurückgezogen') + r('alle', 'Alle', 'komplette Liste');
+    const n = { todo: 0, warten: 0, fertig: 0, beendet: 0, alle: basis.length };
+    basis.forEach(x => { n[kategorie(x.st, x.d)]++; });
+    const offen = basis.filter(x => !x.st.ende && !x.st.fertig);
+    const alarm = { frist: offen.filter(fristBald).length, offen: offen.filter(hatOffenePunkte).length, datenfehlen: offen.filter(fehltDaten).length };
+    const kritisch = offen.some(x => { const fr = E.fristen(x.d, heute())[0]; return fr && ['unbekannt', 'ueberfaellig'].includes(fr.stufe); });
+    const seg = (k, t) => `<button class="seg-knopf ${S.ansicht === k ? 'aktiv' : ''}" data-ansicht="${k}">${t}<span>${n[k]}</span></button>`;
+    const chip = (k, icon, t, laut) => alarm[k] ? `<button class="alarm alarm-${k} ${laut ? 'laut' : ''} ${S.extra === k ? 'aktiv' : ''}" data-extra="${k}" title="${esc(t)}"><svg><use href="#${icon}"/></svg><b>${alarm[k]}</b><span>${t}</span></button>` : '';
+    $('#reiter').innerHTML = `<div class="seg">${seg('todo', 'Zu tun')}${seg('warten', 'Wartet')}${seg('fertig', 'Fertig')}${seg('beendet', 'Beendet')}${seg('alle', 'Alle')}</div>
+      <div class="alarme">${chip('frist', 'i-history', 'Fristen', kritisch)}${chip('offen', 'i-flag', 'Offene Punkte')}${chip('datenfehlen', 'i-alert', 'Daten fehlen', true)}</div>`;
+  }
+
+  // Phasen-Balken: 5 Phasen mit Anzahl, Klick filtert
+  function zeichnePhasen(inAnsicht) {
+    const el = $('#extra-filter');
+    if (['todo', 'warten'].indexOf(S.ansicht) < 0) { el.innerHTML = ''; return; }
+    const n = {};
+    inAnsicht.forEach(x => { const a = E.aufgabe(x.d, x.st); if (a) n[a.phase] = (n[a.phase] || 0) + 1; });
+    el.innerHTML = `<nav class="phasen" aria-label="Phasen">${E.PHASEN.map(p => `<button class="phase-knopf p-${p.key} ${S.phase === p.key ? 'aktiv' : ''} ${n[p.key] ? '' : 'leer'}" data-phase="${p.key}">
+      <span class="phase-name">${esc(p.label)}</span><b>${n[p.key] || 0}</b></button>`).join('')}</nav>`;
   }
 
   // Frist als kleines Etikett; lang = mit Resttagen
@@ -326,92 +341,82 @@
   }
   const callsText = v => String(v || '').split(',').map(x => datumDE(x.trim())).filter(Boolean).join(', ');
 
-  function zeileHtml(d, st, bearbeiten) {
+  function zeileHtml(d, st, bearbeiten, ohneFrist) {
     const n = E.aufgabe(d, st);
     const fehlt = E.fehlendeDaten(d);
     const fr = E.fristen(d, heute())[0];
     const s = d.schritte || {};
-    const info = [[d.plz, d.ort].filter(Boolean).join(' '), d.foerdercall ? 'Call ' + datumDE(d.foerdercall) : '',
-      d.zieher ? 'Ticket: ' + d.zieher : '', d.mitarbeiter ? 'Verkauf: ' + d.mitarbeiter : ''].filter(Boolean);
+    const meta = [[d.plz, d.ort].filter(Boolean).join(' '), d.foerdercall ? 'Call ' + datumDE(d.foerdercall).slice(0, 6) + d.foerdercall.slice(2, 4) : '',
+      d.kwp ? zahlDE(d.kwp) + ' kWp' : '', d.zieher || ''].filter(Boolean);
     let knopf = '';
     if (st.fertig) {
-      const w = s.ausgezahlt;
-      knopf = `<span class="zeile-fertig"><svg><use href="#i-check"/></svg>${w && w !== '✓' ? 'Ausgezahlt ' + datumDE(w) : 'Ausgezahlt'}</span>`;
+      knopf = `<span class="z-status ok"><svg><use href="#i-check"/></svg>${s.ausgezahlt && s.ausgezahlt !== '✓' ? datumDE(s.ausgezahlt) : 'ausgezahlt'}</span>`;
     } else if (st.ende) {
       const w = s[st.ende.key];
       knopf = st.ende.key === 'abgelehnt' && bearbeiten && E.offenerCall(heute())
-        ? `<button class="erledigt" data-neu-ansuchen title="Im Call ${esc(datumDE(E.offenerCall(heute())))} neu ansuchen"><svg><use href="#i-restore"/></svg>Neu ansuchen</button>`
-        : `<span class="zeile-ende">${esc(st.ende.label)}${w && w !== '✓' ? ' ' + datumDE(w) : ''}</span>`;
+        ? `<button class="z-knopf" data-neu-ansuchen title="Im Call ${esc(datumDE(E.offenerCall(heute())))} neu ansuchen"><svg><use href="#i-restore"/></svg>Neu ansuchen</button>`
+        : `<span class="z-status ende">${esc(st.ende.label)}${w && w !== '✓' ? ' · ' + datumDE(w) : ''}</span>`;
+    } else if (bearbeiten && !n.auto) {
+      knopf = `<button class="z-knopf" data-schnell="${n.key}" title="${esc(n.todo)} – heute erledigt"><svg><use href="#i-check"/></svg>${esc(n.knopf)}</button>`;
     } else if (bearbeiten) {
-      knopf = n.auto
-        ? `<button class="erledigt erledigt-leise" data-oeffnen>${esc(n.knopf)}</button>`
-        : `<button class="erledigt" data-schnell="${n.key}" title="${esc(n.todo)} – heute erledigt"><svg><use href="#i-check"/></svg>${esc(n.knopf)}</button>`;
+      knopf = `<button class="z-knopf leise" data-oeffnen>${esc(n.knopf)}</button>`;
     }
-    return `<div class="zeile" data-id="${d.id}" tabindex="0">
-      <div class="wer">
-        <div class="name">${esc(d.kunde || '(ohne Namen)')}${s.frueher_abgelehnt ? ` <span class="marke-klein" title="Abgelehnt im Call ${esc(callsText(s.frueher_abgelehnt))}">2. Versuch</span>` : ''}</div>
-        <div class="info">${esc(info.join(' · '))}</div>
-        ${fr && fr.stufe !== 'ruhig' ? `<div class="hinweis-frist">${fristBadge(fr, true)}</div>` : ''}
-        ${(d.offene_punkte || '').trim() ? `<div class="hinweis"><svg><use href="#i-flag"/></svg>${esc(d.offene_punkte)}</div>` : ''}
-        ${fehlt.length && st.hoechster < E.IDX.ticket && !st.ende ? `<div class="hinweis warn"><svg><use href="#i-alert"/></svg>Es fehlen noch: ${esc(fehlt.join(', '))}</div>` : ''}
-      </div>
-      <div class="zeile-stand">${fortschritt(d, st)}<span>${st.erledigt.filter(Boolean).length} von ${SCHRITTE.length}</span></div>
-      <div class="zeile-knopf">${knopf}</div>
+    const flags = [
+      s.frueher_abgelehnt ? `<span class="z-tag" title="Abgelehnt im Call ${esc(callsText(s.frueher_abgelehnt))}">2. Versuch</span>` : '',
+      (d.offene_punkte || '').trim() ? `<span class="z-icon gelb" title="${esc(d.offene_punkte)}"><svg><use href="#i-flag"/></svg></span>` : '',
+      fehlt.length && st.hoechster < E.IDX.ticket && !st.ende ? `<span class="z-icon rot" title="Es fehlen: ${esc(fehlt.join(', '))}"><svg><use href="#i-alert"/></svg></span>` : ''
+    ].join('');
+    const phase = st.fertig ? 'fertig' : st.ende ? 'ende' : n.phase;
+    return `<div class="z" data-id="${d.id}" tabindex="0">
+      <span class="z-punkt p-${phase}" aria-hidden="true"></span>
+      <div class="z-haupt"><div class="z-name">${esc(d.kunde || '(ohne Namen)')}${flags}</div><div class="z-meta">${esc(meta.join(' · '))}</div></div>
+      <div class="z-frist">${ohneFrist ? '' : fr && fr.stufe !== 'ruhig' ? fristBadge(fr, true) : fr ? `<span class="z-datum">${esc(fr.label)} bis ${datumDE(fr.datum)}</span>` : ''}</div>
+      <div class="z-aktion">${knopf}</div>
     </div>`;
   }
 
-
   function zeichneGruppen(liste) {
     const bearbeiten = darf('bearbeiten') && !S.filter.papierkorb;
+    $('#liste-info').innerHTML = S.filter.papierkorb ? '<b class="rot">Papierkorb</b>' : '';
+    if (!S.daten.length) {
+      $('#liste').innerHTML = `<div class="leer-hinweis">${darf('admin') ? 'Noch keine Kunden. Oben auf „Neuer Kunde“ klicken oder die Excel-Liste importieren.' : 'Noch keine Kunden erfasst.'}</div>`;
+      return;
+    }
     const gruppen = new Map();
     liste.forEach(x => {
       const key = x.st.fertig ? 'fertig' : x.st.ende ? x.st.ende.key : E.aufgabe(x.d, x.st).key;
       if (!gruppen.has(key)) gruppen.set(key, []);
       gruppen.get(key).push(x);
     });
-    $('#liste-info').innerHTML = S.filter.papierkorb ? '<b class="rot">Papierkorb</b>' : '';
-    if (!S.daten.length) {
-      $('#liste').innerHTML = `<div class="leer-hinweis">${darf('admin') ? 'Noch keine Kunden. Oben auf „Neuer Kunde“ klicken oder die Excel-Liste importieren.' : 'Noch keine Kunden erfasst.'}</div>`;
-      return;
-    }
-    const suche = !!S.filter.suche || !!S.extra;
-    const zeigen = suche ? 999 : 6;
     const defs = S.ansicht === 'fertig' ? [{ key: 'fertig', todo: 'Ausgezahlt', phase: 'fertig' }]
       : S.ansicht === 'beendet' ? E.ENDE.map(e => ({ key: e.key, todo: e.label, phase: 'ende' }))
       : GRUPPEN;
-
-    // Schrittleiste: jeder Schritt mit Anzahl, Klick springt zur Gruppe
-    const leiste = S.ansicht !== 'offen' ? '' : `<nav class="schrittleiste" style="grid-template-columns:repeat(${GRUPPEN.length},minmax(0,1fr))" aria-label="Ablauf">${GRUPPEN.map((g, i) => {
-      const n = (gruppen.get(g.key) || []).length;
-      return `<a href="#gruppe-${g.key}" class="sl sl-${g.phase} ${n ? '' : 'leer'} ${g.warten ? 'sl-warten' : ''}" title="${esc(g.warten || g.todo)}">
-        <span class="sl-nr">${i + 1}</span><span class="sl-zahl">${n}</span><span class="sl-text">${esc(g.kurz || g.todo)}</span></a>`;
-    }).join('')}</nav>`;
-
+    const RANG = { unbekannt: 0, ueberfaellig: 1, dringend: 2, bald: 3, ruhig: 4 };
+    const dringlich = x => { const fr = E.fristen(x.d, heute())[0]; return fr ? RANG[fr.stufe] + (fr.datum || '') : '9'; };
+    const zeigen = (S.filter.suche || S.extra) ? 999 : 8;
     const call = E.offenerCall(heute());
-    const gruppenHtml = defs.map((g, i) => {
-      const k = g.key;
-      const eintraege = (gruppen.get(k) || []).sort((a, b) => ((a.d.foerdercall || '9999') + a.d.kunde).localeCompare((b.d.foerdercall || '9999') + b.d.kunde, 'de'));
-      const nr = S.ansicht === 'offen' ? String(i + 1) : `<svg><use href="#${S.ansicht === 'fertig' ? 'i-check' : 'i-flag'}"/></svg>`;
-      const warten = g.warten ? '<span class="warte-tag">wartet auf Förderstelle</span>' : '';
-      if (!eintraege.length) {
-        if (suche || S.ansicht !== 'offen') return '';
-        return `<section class="gruppe gruppe-leer g-${g.phase}" id="gruppe-${k}">
-          <div class="gruppe-kopf"><span class="gruppe-nr">${nr}</span><h2>${esc(g.todo)}</h2>${warten}<span class="leer-text">nichts offen</span></div></section>`;
-      }
-      const offen = S.aufgeklappt.has(k) || eintraege.length <= zeigen + 1;
-      const extra = k === 'aufgeteilt' && bearbeiten ? '<button class="btn btn-wuerfel" data-aktion="wuerfeln"><svg><use href="#i-dice"/></svg>Automatisch aufteilen</button>'
-        : k === 'abgelehnt' && bearbeiten && call && eintraege.length > 1 ? `<button class="btn btn-wuerfel" data-aktion="alle-neu-ansuchen"><svg><use href="#i-restore"/></svg>Alle ${eintraege.length} im Call ${esc(datumDE(call))} neu ansuchen</button>` : '';
-      return `<section class="gruppe g-${g.phase} ${g.warten ? 'gruppe-warten' : ''}" id="gruppe-${k}">
-        <div class="gruppe-kopf"><span class="gruppe-nr">${nr}</span><h2>${esc(g.todo)}</h2><span class="anz">${eintraege.length}</span>${warten}${extra}</div>
-        <div class="gruppe-karte">
-          ${(offen ? eintraege : eintraege.slice(0, zeigen)).map(x => zeileHtml(x.d, x.st, bearbeiten)).join('')}
-          ${offen ? '' : `<button class="mehr" data-mehr="${k}">Alle ${eintraege.length} anzeigen</button>`}
-        </div>
+    const html = defs.map(g => {
+      const eintraege = (gruppen.get(g.key) || []).sort((a, b) => dringlich(a).localeCompare(dringlich(b)) || (a.d.kunde || '').localeCompare(b.d.kunde || '', 'de'));
+      if (!eintraege.length) return '';
+      const offen = S.aufgeklappt.has(g.key) || eintraege.length <= zeigen + 2;
+      const extra = g.key === 'aufgeteilt' && bearbeiten ? '<button class="g-knopf" data-aktion="wuerfeln"><svg><use href="#i-dice"/></svg>Automatisch aufteilen</button>'
+        : g.key === 'abgelehnt' && bearbeiten && call && eintraege.length > 1 ? `<button class="g-knopf" data-aktion="alle-neu-ansuchen"><svg><use href="#i-restore"/></svg>Alle im Call ${esc(datumDE(call))} neu ansuchen</button>` : '';
+      const hilfe = g.warten ? 'wartet auf die Förderstelle' : (g.hilfe || '');
+      // Gleiche Frist für die ganze Gruppe (z. B. Ticket am Calltag): einmal oben statt in jeder Zeile
+      const fristen = eintraege.map(x => E.fristen(x.d, heute())[0] || null);
+      const f0 = fristen[0];
+      const gemeinsam = eintraege.length > 1 && f0 && fristen.every(f => f && f.art === f0.art && f.datum === f0.datum);
+      return `<section class="g" id="gruppe-${g.key}">
+        <header class="g-kopf"><span class="z-punkt p-${g.phase}" aria-hidden="true"></span><h2>${esc(g.todo)}</h2><span class="g-n">${eintraege.length}</span>${gemeinsam ? `<span class="g-frist">${fristBadge(f0, true)}</span>` : ''}${hilfe ? `<span class="g-hilfe">${esc(hilfe)}</span>` : ''}${extra}</header>
+        <div class="g-karte">${(offen ? eintraege : eintraege.slice(0, zeigen)).map(x => zeileHtml(x.d, x.st, bearbeiten, gemeinsam)).join('')}
+          ${offen ? '' : `<button class="mehr" data-mehr="${g.key}">Alle ${eintraege.length} anzeigen</button>`}</div>
       </section>`;
     }).join('');
-    const leerText = suche ? (S.extra ? 'Keine Kunden mit diesem Filter.' : 'Kein Kunde gefunden.')
+    const leer = (S.filter.suche || S.extra || S.phase) ? 'Nichts gefunden – Filter oder Suche ändern.'
+      : S.ansicht === 'todo' ? 'Nichts zu tun. Alles, was offen ist, wartet auf die Förderstelle.'
+      : S.ansicht === 'warten' ? 'Nichts wartet auf die Förderstelle.'
       : S.ansicht === 'beendet' ? 'Keine abgelehnten oder zurückgezogenen Förderungen.' : 'Noch keine Förderung ausgezahlt.';
-    $('#liste').innerHTML = leiste + (gruppenHtml.trim() ? gruppenHtml : `<div class="leer-hinweis">${leerText}</div>`);
+    $('#liste').innerHTML = html.trim() ? html : `<div class="leer-hinweis">${leer}</div>`;
   }
 
   function fortschritt(d, st) {
@@ -594,7 +599,11 @@
       <input type="date" class="ablauf-datum" data-schritt-datum="${key}" value="${esc(E.istDatum(s[key]) ? s[key] : '')}" ${nurLesen ? 'disabled' : ''} title="Datum"></li>`;
     let html = '';
     E.PHASEN.forEach(ph => {
-      html += `<li class="phase phase-${ph.key}">${esc(ph.label)}</li>`;
+      const idx = SCHRITTE.map((x, i) => x.phase === ph.key ? i : -1).filter(i => i >= 0);
+      const fertig = idx.filter(i => st.erledigt[i]).length;
+      const zu = fertig === idx.length && !(ph.key === 'call' && st.nachforderungOffen);
+      if (html) html += '</ol></details>';
+      html += `<details class="ph ph-${ph.key}" ${zu ? '' : 'open'}><summary><span class="z-punkt p-${ph.key}"></span>${esc(ph.label)}<span class="ph-n">${fertig}/${idx.length}</span></summary><ol class="ablauf">`;
       SCHRITTE.forEach((x, i) => {
         if (x.phase !== ph.key) return;
         html += schrittZeile(rec, st, x, i, nurLesen);
@@ -610,7 +619,7 @@
     const ende = nurLesen ? '' : `<div class="ergebnis"><span class="grau klein">Endet ohne Auszahlung?</span><div class="ergebnis-knoepfe">${E.ENDE.map(e =>
       `<button type="button" class="btn btn-mini-leise ${s[e.key] ? 'aktiv' : ''}" data-ende="${e.key}">${s[e.key] ? '✓ ' : ''}${esc(e.label)}</button>`).join('')}</div></div>`;
     const frueher = s.frueher_abgelehnt ? `<p class="klein grau">Abgelehnt im Call ${esc(callsText(s.frueher_abgelehnt))}, danach neu angesucht.</p>` : '';
-    return fristenHtml(rec) + `<ol class="ablauf">${html}</ol>` + frueher + ende;
+    return fristenHtml(rec) + html + '</ol></details>' + frueher + ende;
   }
 
   function jetztHtml(rec, nurLesen, neu) {
@@ -650,7 +659,10 @@
     const { rec, neu } = S.detail;
     const nurLesen = !darf('bearbeiten') || !!rec.geloescht_am;
     $('#d-titel').textContent = neu ? 'Neue Förderung' : (rec.kunde || '(ohne Namen)');
-    $('#d-sub').innerHTML = neu ? '' : esc([rec.plz, rec.ort].filter(Boolean).join(' ')) +
+    const stK = E.status(rec), aK = E.aufgabe(rec, stK);
+    const etikett = neu ? '' : stK.fertig ? '<span class="d-etikett p-fertig">Ausgezahlt</span>' : stK.ende ? `<span class="d-etikett p-ende">${esc(stK.ende.label)}</span>`
+      : `<span class="d-etikett p-${aK.phase}">${esc((E.PHASEN.find(p => p.key === aK.phase) || {}).label || '')} · ${esc(aK.kurz || aK.todo)}</span>`;
+    $('#d-sub').innerHTML = neu ? '' : etikett + ' ' + esc([rec.plz, rec.ort].filter(Boolean).join(' ')) +
       (rec.geaendert_von ? ` <span class="grau">· zuletzt ${esc(rec.geaendert_von)}, ${new Date(rec.geaendert_am).toLocaleString('de-AT', { dateStyle: 'short', timeStyle: 'short' })}</span>` : '') +
       (rec.geloescht_am ? ' · <b class="rot">im Papierkorb</b>' : '');
     $('#d-inhalt').innerHTML = `
@@ -1285,16 +1297,19 @@
     $('#nutzer-btn').addEventListener('click', e => { e.stopPropagation(); $('#nutzer-menue').hidden = !$('#nutzer-menue').hidden; });
 
     $('#extra-filter').addEventListener('click', e => {
-      const b = e.target.closest('[data-extra]');
+      const b = e.target.closest('[data-phase]');
       if (!b) return;
-      S.extra = S.extra === b.dataset.extra ? '' : b.dataset.extra;
+      S.phase = S.phase === b.dataset.phase ? '' : b.dataset.phase;
       S.aufgeklappt.clear();
       zeichne();
     });
     $('#reiter').addEventListener('click', e => {
+      const x = e.target.closest('[data-extra]');
+      if (x) { S.extra = S.extra === x.dataset.extra ? '' : x.dataset.extra; S.aufgeklappt.clear(); zeichne(); return; }
       const b = e.target.closest('[data-ansicht]');
       if (!b) return;
       S.ansicht = b.dataset.ansicht; S.aufgeklappt.clear();
+      if (['todo', 'warten'].indexOf(S.ansicht) < 0) S.phase = '';
       zeichne();
     });
 
@@ -1312,13 +1327,13 @@
       const mehr = e.target.closest('[data-mehr]');
       if (mehr) { S.aufgeklappt.add(mehr.dataset.mehr); zeichne(); return; }
       const q = e.target.closest('[data-schnell]');
-      const tr = e.target.closest('tr[data-id], .zeile[data-id]');
+      const tr = e.target.closest('tr[data-id], .zeile[data-id], .z[data-id]');
       if (q && tr) { e.stopPropagation(); schnellErledigt(tr.dataset.id, q.dataset.schnell); return; }
       if (e.target.closest('[data-neu-ansuchen]') && tr) { e.stopPropagation(); schnellNeuAnsuchen(tr.dataset.id); return; }
       if (tr) oeffne(S.daten.find(d => d.id === tr.dataset.id));
     });
     $('#liste').addEventListener('keydown', e => {
-      const tr = e.target.closest('tr[data-id], .zeile[data-id]');
+      const tr = e.target.closest('tr[data-id], .zeile[data-id], .z[data-id]');
       if (tr && e.key === 'Enter' && e.target === tr) oeffne(S.daten.find(d => d.id === tr.dataset.id));
     });
 

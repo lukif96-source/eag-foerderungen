@@ -571,3 +571,107 @@ body.demo .kopf::after { content: "DEMO – keine echten Daten"; position: absol
 .feld-hinweis { display: block; font-size: 11.5px; color: var(--text-2); margin-top: 3px; min-height: 0; }
 .feld-hinweis:empty { display: none; }
 .sl-text { hyphens: auto; overflow-wrap: anywhere; }
+
+/* =====================================================================
+   Übersicht, Design 2: ruhig, dicht, Fristen vorne.
+   Ansicht-Leiste (Segment + Alarme) · Phasen-Balken · kompakte Zeilen
+   ===================================================================== */
+.p-vor { --farbe: var(--blau); }
+.p-call { --farbe: var(--violett); }
+.p-zusage { --farbe: var(--tuerkis); }
+.p-bau { --farbe: var(--amber); }
+.p-abrechnung { --farbe: var(--braun); }
+.p-fertig { --farbe: var(--gruen-dunkel); }
+.p-ende { --farbe: var(--rot); }
+
+#reiter.reiter { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.seg { display: inline-flex; background: #e8ebe5; border-radius: 10px; padding: 3px; gap: 2px; }
+.seg-knopf { border: 0; background: transparent; padding: 7px 13px; border-radius: 8px; font: inherit; font-size: 13.5px; font-weight: 500; color: var(--text-2); cursor: pointer; display: inline-flex; gap: 7px; align-items: center; white-space: nowrap; }
+.seg-knopf span { font-size: 12px; font-weight: 600; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.seg-knopf:hover { color: var(--text); }
+.seg-knopf.aktiv { background: #fff; color: var(--text); box-shadow: 0 1px 2px rgba(20, 30, 15, .12); }
+.seg-knopf.aktiv span { color: var(--gruen-dunkel); }
+.alarme { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.alarm { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 11px; border-radius: 9px; border: 1px solid var(--linie); background: #fff; font: inherit; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.alarm svg { width: 15px; height: 15px; }
+.alarm b { color: var(--text); font-variant-numeric: tabular-nums; }
+.alarm.laut { border-color: #efc4be; background: var(--rot-hell); color: var(--rot); }
+.alarm.laut b { color: var(--rot); }
+.alarm.aktiv { box-shadow: inset 0 0 0 1.5px currentColor; }
+
+.phasen { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: #fff; border: 1px solid var(--linie); border-radius: 12px; overflow: hidden; }
+.phase-knopf { position: relative; border: 0; border-left: 1px solid var(--linie-2); background: #fff; padding: 13px 16px 11px; text-align: left; font: inherit; cursor: pointer; display: grid; gap: 1px; }
+.phase-knopf:first-child { border-left: 0; }
+.phase-knopf::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--farbe, var(--text-3)); opacity: .85; }
+.phase-name { font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--text-2); }
+.phase-knopf b { font-size: 24px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.15; }
+.phase-knopf.leer b { color: #c6ccc3; }
+.phase-knopf:hover { background: #fafbf9; }
+.phase-knopf.aktiv { background: color-mix(in srgb, var(--farbe) 8%, #fff); }
+.phase-knopf.aktiv .phase-name, .phase-knopf.aktiv b { color: var(--farbe); }
+
+.g + .g { margin-top: 20px; }
+.g-kopf { display: flex; align-items: center; gap: 8px; margin: 0 4px 8px; flex-wrap: wrap; min-height: 30px; }
+.g-kopf h2 { font-size: 14.5px; font-weight: 600; }
+.g-n { font-size: 12.5px; font-weight: 600; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.g-hilfe { font-size: 12.5px; color: var(--text-3); }
+.g-knopf { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--linie); background: #fff; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--text); cursor: pointer; }
+.g-knopf svg { width: 14px; height: 14px; }
+.g-knopf:hover { border-color: #c6ccc3; background: #fafbf9; }
+.g-karte { background: #fff; border: 1px solid var(--linie); border-radius: 12px; overflow: hidden; }
+.g-karte .mehr { border-top: 1px solid var(--linie-2); }
+
+.z { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto; align-items: center; gap: 14px; padding: 11px 14px 11px 16px; border-top: 1px solid var(--linie-2); cursor: pointer; transition: background .08s; }
+.z:first-child { border-top: 0; }
+.z:hover { background: #fafbf8; }
+.z:focus-visible { outline: 2px solid var(--gruen); outline-offset: -2px; }
+.z-punkt { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--farbe, var(--text-3)); flex: none; }
+.z-haupt { min-width: 0; }
+.z-name { font-weight: 600; font-size: 14.5px; display: flex; align-items: center; gap: 7px; min-width: 0; }
+.z-meta { font-size: 12.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.z-tag { font-size: 11px; font-weight: 600; color: var(--violett); background: var(--violett-hell); border-radius: 5px; padding: 1px 6px; }
+.z-icon { display: inline-grid; place-items: center; }
+.z-icon svg { width: 14px; height: 14px; }
+.z-icon.gelb { color: var(--amber); }
+.z-icon.rot { color: var(--rot); }
+.z-frist { justify-self: end; }
+.z-datum { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.z-aktion { justify-self: end; }
+.z-knopf { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--linie); background: #fff; font: inherit; font-size: 13px; font-weight: 600; color: var(--gruen-dunkel); cursor: pointer; white-space: nowrap; }
+.z-knopf svg { width: 15px; height: 15px; stroke-width: 2.4; }
+.z-knopf:hover { background: var(--gruen); border-color: var(--gruen); color: #fff; }
+.z-knopf.leise { color: var(--text-2); font-weight: 500; }
+.z-knopf.leise:hover { background: var(--linie-2); border-color: var(--linie); color: var(--text); }
+.z-status { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.z-status svg { width: 14px; height: 14px; stroke-width: 2.4; }
+.z-status.ok { color: var(--gruen-dunkel); }
+.z-status.ende { color: var(--rot); }
+
+/* Akte: Phasen als aufklappbare Abschnitte, Stand als Etikett im Kopf */
+.ph { border-top: 1px solid var(--linie-2); }
+.ph:first-of-type { border-top: 0; }
+.ph > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 10px 4px; cursor: pointer; font-size: 11.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-2); }
+.ph > summary::-webkit-details-marker { display: none; }
+.ph-n { margin-left: auto; font-weight: 600; color: var(--text-3); letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.ph:not([open]) > summary { color: var(--text-3); }
+.ph:not([open]) > summary .ph-n { color: var(--gruen-dunkel); }
+.ph > .ablauf { padding-bottom: 8px; }
+.d-etikett { display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; color: var(--farbe); background: color-mix(in srgb, var(--farbe) 10%, #fff); border-radius: 6px; padding: 2px 8px; margin-right: 4px; }
+
+@media (max-width: 760px) {
+  #reiter.reiter { align-items: stretch; }
+  .seg { width: 100%; overflow-x: auto; }
+  .seg-knopf { padding: 7px 10px; flex: 1 0 auto; justify-content: center; }
+  .phasen { grid-template-columns: repeat(5, minmax(68px, 1fr)); overflow-x: auto; }
+  .phase-knopf { padding: 10px 10px 8px; }
+  .phase-name { font-size: 10px; }
+  .phase-knopf b { font-size: 20px; }
+  .z { grid-template-columns: 8px minmax(0, 1fr) auto; row-gap: 6px; gap: 10px; }
+  .z-frist { grid-column: 2 / -1; grid-row: 2; justify-self: start; }
+  .z-aktion { grid-column: 3; grid-row: 1; }
+  .z-knopf { padding: 0 10px; }
+}
+
+#extra-filter { display: block; }
+#extra-filter .phasen { width: 100%; }
+.g-frist { margin-left: 2px; }
