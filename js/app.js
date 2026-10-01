@@ -7,7 +7,9 @@
   const ALLE_LABEL = Object.assign({}, ...SCHRITTE.map(x => ({ [x.key]: x.label })), ...E.ENDE.map(x => ({ [x.key]: x.label })), E.NEBEN);
   // Gruppen der Übersicht: jeder Schritt, dazu "Unterlagen nachreichen" vor dem Warten auf den Vertrag
   const GRUPPEN = SCHRITTE.flatMap(x => x.key === 'vertrag_erhalten'
-    ? [{ key: 'nachgereicht', todo: 'Unterlagen nachreichen', kurz: 'Nachreichen', phase: 'call', neben: true }, x] : [x]);
+    ? [{ key: 'nachgereicht', todo: 'Unterlagen nachreichen', kurz: 'Nachreichen', phase: 'call', neben: true }, x]
+    : x.key === 'ausgezahlt' ? [{ key: 'nachgereicht_abrechnung', todo: 'Unterlagen zur Endabrechnung nachreichen', kurz: 'Nachreichen', phase: 'abrechnung', neben: true,
+        hilfe: 'Nur über das EAG-Portal.' }, x] : [x]);
 
   const $ = (s, el) => (el || document).querySelector(s);
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
@@ -26,7 +28,7 @@
     jahr: 'Jahr', programm: 'Programm', art: 'Art', foerdercall: 'Fördercall', mitarbeiter: 'Mitarbeiter', zieher: 'Ticket-Zieher',
     kunde: 'Kunde', geburtsdatum: 'Geb.-Datum', vollmacht: 'Vollmacht', strasse: 'Straße', plz: 'PLZ', ort: 'Ort', kg_gst: 'KG / Gst.-Nr.',
     zaehlpunkt: 'Zählpunkt', mail: 'Mail', projekt_nr: 'Projekt-Nr.', kwp: 'kWp', modulflaeche: 'Modulfläche m²', einspeisung: 'Einspeisung',
-    wr_leistung: 'WR-Leistung', speicher: 'Speicher', anbringung: 'Anbringung', zeitplan: 'Zeitplan', ticket: 'Ticket', fpj: 'FPJ-Nr.',
+    wr_leistung: 'WR-Leistung', speicher: 'Speicher', anbringung: 'Anbringung', zeitplan: 'Zeitplan', ticket: 'Ticket', fpj: 'FPJ-Nr.', eag_nr: 'EAG-Nr.',
     offene_punkte: 'Offene Punkte', info: 'Info', geloescht_am: 'Papierkorb', schritte: 'Ablauf'
   };
 
@@ -52,7 +54,8 @@
       { k: 'foerdercall', typ: 'date' },
       { k: 'mitarbeiter', label: 'Mitarbeiter (Verkauf)', liste: 'mitarbeiter' },
       { k: 'zieher', label: 'Ticket-Zieher', liste: 'zieher' },
-      { k: 'ticket', mono: true }, { k: 'fpj', label: 'FPJ-Nr. (Portal)', mono: true }
+      { k: 'ticket', mono: true }, { k: 'fpj', label: 'FPJ-Nr. (Portal)', mono: true },
+      { k: 'eag_nr', label: 'EAG-Nr. (Einreichung)', mono: true, nurWenn: 'eag_nr' }
     ] },
     { titel: 'Notizen', felder: [
       { k: 'offene_punkte', typ: 'textarea', breit: true }, { k: 'info', typ: 'textarea', breit: true }
@@ -218,6 +221,7 @@
     try {
       S.daten = await Q.liste();
       S.geladenUm = Date.now();
+      await postLaden();
       fuelleFilter();
       zeichne();
       if (!still) { /* ruhig */ }
@@ -261,7 +265,7 @@
     if (f.zieher && (f.zieher === '–' ? !!(d.zieher || '').trim() : !(d.zieher || '').split(' / ').map(s => s.trim()).includes(f.zieher))) return false;
     if (f.suche) {
       const q = f.suche.toLowerCase();
-      const heu = [d.kunde, d.ort, d.plz, d.strasse, d.zaehlpunkt, d.projekt_nr, d.ticket, d.fpj, d.mail, d.mitarbeiter, d.zieher, d.offene_punkte, d.info].join(' ').toLowerCase();
+      const heu = [d.kunde, d.ort, d.plz, d.strasse, d.zaehlpunkt, d.projekt_nr, d.ticket, d.fpj, d.eag_nr, d.mail, d.mitarbeiter, d.zieher, d.offene_punkte, d.info].join(' ').toLowerCase();
       if (!q.split(/\s+/).every(t => heu.includes(t))) return false;
     }
     return true;
@@ -345,12 +349,13 @@
     basis.forEach(x => { n[kategorie(x.st, x.d)]++; });
     const offen = basis.filter(x => !x.st.ende && !x.st.fertig);
     const alarm = { frist: offen.filter(fristBald).length, offen: offen.filter(hatOffenePunkte).length, datenfehlen: offen.filter(fehltDaten).length,
-      abgelehnt: E.offenerCall(heute()) ? basis.filter(x => x.st.ende && x.st.ende.key === 'abgelehnt').length : 0 };
+      abgelehnt: E.offenerCall(heute()) ? basis.filter(x => x.st.ende && x.st.ende.key === 'abgelehnt').length : 0,
+      post: darf('bearbeiten') && S.post ? S.post.filter(p => p.status === 'offen' || p.status === 'vorschlag').length : 0 };
     const kritisch = offen.some(x => { const fr = E.fristen(x.d, heute())[0]; return fr && fr.stufe === 'ueberfaellig'; });
     const seg = (k, t) => `<button class="seg-knopf ${S.ansicht === k ? 'aktiv' : ''}" data-ansicht="${k}">${t}<span>${n[k]}</span></button>`;
     const chip = (k, icon, t, laut) => alarm[k] ? `<button class="alarm alarm-${k} ${laut ? 'laut' : ''} ${S.extra === k ? 'aktiv' : ''}" data-extra="${k}" title="${esc(t)}"><svg><use href="#${icon}"/></svg><b>${alarm[k]}</b><span>${t}</span></button>` : '';
     $('#reiter').innerHTML = `<div class="seg">${seg('todo', 'Zu tun')}${seg('warten', 'Wartet')}${seg('fertig', 'Fertig')}${seg('beendet', 'Beendet')}${seg('alle', 'Alle')}</div>
-      <div class="alarme">${chip('frist', 'i-history', 'Fristen', kritisch)}${chip('offen', 'i-flag', 'Offene Punkte')}${chip('datenfehlen', 'i-alert', 'Daten fehlen', true)}${chip('abgelehnt', 'i-restore', `abgelehnt – neu ansuchen bis ${datumDE(E.callEnde(E.offenerCall(heute()) || '') || '').slice(0, 6)}`, true)}</div>`;
+      <div class="alarme">${chip('frist', 'i-history', 'Fristen', kritisch)}${chip('offen', 'i-flag', 'Offene Punkte')}${chip('datenfehlen', 'i-alert', 'Daten fehlen', true)}${chip('abgelehnt', 'i-restore', `abgelehnt – neu ansuchen bis ${datumDE(E.callEnde(E.offenerCall(heute()) || '') || '').slice(0, 6)}`, true)}${chip('post', 'i-doc', 'OeMAG-Mails prüfen', true)}</div>`;
   }
 
   // Phasen-Balken: 5 Phasen mit Anzahl, Klick filtert
@@ -769,6 +774,10 @@
           html += neben('nachforderung', 'Nachforderung erhalten');
           if (s.nachforderung) html += neben('nachgereicht', 'Unterlagen nachgereicht');
         }
+        if (x.key === 'abgeschlossen' && (st.erledigt[i] || s.nachforderung_abrechnung)) {
+          html += neben('nachforderung_abrechnung', 'Nachforderung zur Endabrechnung');
+          if (s.nachforderung_abrechnung) html += neben('nachgereicht_abrechnung', 'Unterlagen nachgereicht');
+        }
         if (x.key === 'inbetriebnahme' && ((st.erledigt[E.IDX.vertrag_erhalten] && !st.erledigt[i]) || s.verlaengert_bis)) {
           html += neben('verlaengert_bis', 'Frist verlängert bis');
         }
@@ -845,7 +854,8 @@
       <div class="detail-raster">
         <section class="karte karte-ablauf"><h3><svg><use href="#i-bolt"/></svg>Ablauf</h3><div id="d-ablauf">${ablaufHtml(rec, nurLesen)}</div></section>
         <div class="detail-felder">
-          ${FORM.map(sec => `<section class="karte"><h3>${esc(sec.titel)}</h3><div class="felder">${sec.felder.map(f => feldHtml(f, rec, nurLesen)).join('')}</div></section>`).join('')}
+          ${FORM.map(sec => `<section class="karte"><h3>${esc(sec.titel)}</h3><div class="felder">${sec.felder.filter(f => !f.nurWenn || spalteDa(f.nurWenn)).map(f => feldHtml(f, rec, nurLesen)).join('')}</div></section>`).join('')}
+          ${neu ? '' : postAkteHtml(rec)}
           ${neu ? '' : `<section class="karte"><h3><svg><use href="#i-history"/></svg>Verlauf</h3><div id="d-verlauf" class="verlauf grau">wird geladen …</div></section>`}
         </div>
       </div>`;
@@ -1086,6 +1096,124 @@
   // ---------------------------------------------------------------
   // Dialog-Helfer
   // ---------------------------------------------------------------
+  // ---------------------------------------------------------------
+  // OeMAG-Posteingang: Mails werden automatisch gelesen (Edge Function „oemag“) oder hier eingefügt.
+  // Kennungen und geprüfte Mail-Arten sind schon übernommen; Vorschläge mit einem Klick.
+  // ---------------------------------------------------------------
+  const spalteDa = k => Q.demo || S.daten.some(d => k in d);
+  async function postLaden() {
+    if (!S.ich || !darf('lesen')) return;
+    try { S.post = await Q.posteingang(); S.postFehlt = false; }
+    catch (e) { S.post = null; S.postFehlt = !!e.fehlt; }
+  }
+  const PE_STATUS = { offen: 'nicht zugeordnet', vorschlag: 'Vorschlag', angewendet: 'übernommen', erledigt: 'nichts zu tun', ignoriert: 'ignoriert' };
+  const PE_ZU = { eag_nr: 'über die EAG-Nr.', fpj: 'über die FPJ-Nr.', zaehlpunkt: 'über den Zählpunkt', hand: 'von Hand', mehrdeutig: 'mehrdeutig' };
+  // Automatisch + Vorschlag zusammen (für „Übernehmen“ von Hand)
+  function peGesamt(a, b) {
+    const x = Object.assign({}, a || {}, b || {});
+    if ((a && a.schritte) || (b && b.schritte)) x.schritte = Object.assign({}, (a || {}).schritte, (b || {}).schritte);
+    return x;
+  }
+  function peKarte(p, bearbeiten) {
+    const e = p.erkannt || {};
+    const f = p.foerderung_id ? S.daten.find(d => d.id === p.foerderung_id) : null;
+    const chips = [e.eagNr && ['EAG-Nr.', e.eagNr], e.zaehlpunkt && ['Zählpunkt', '…' + e.zaehlpunkt.slice(-8)], e.ticket && ['Ticket', e.ticket + (e.uhrzeit ? ' · ' + e.uhrzeit : '')],
+      e.fristBis && ['Frist', datumDE(e.fristBis)], e.grund && ['Grund', e.grund]].filter(Boolean);
+    const offen = p.status === 'offen' || p.status === 'vorschlag';
+    const kandidaten = (p.kandidaten || []).map(id => S.daten.find(d => d.id === id)).filter(Boolean);
+    const wahl = !f && bearbeiten && offen ? `<select class="pe-wahl" data-pe-wahl="${p.id}"><option value="">Förderung wählen …</option>
+        ${(kandidaten.length ? kandidaten : S.daten.filter(d => !d.geloescht_am).sort((a, b) => (a.kunde || '').localeCompare(b.kunde || '', 'de')))
+          .map(d => `<option value="${d.id}">${esc(d.kunde || '(ohne Namen)')} · ${esc(d.ort || '')} · …${esc(String(d.zaehlpunkt || '').slice(-6))}</option>`).join('')}</select>` : '';
+    return `<article class="pe-karte pe-${p.status}">
+      <header class="pe-kopf"><span class="pe-art ${p.sicher ? 'pe-sicher' : ''}">${esc((E.OEMAG.ARTEN.find(a => a.art === p.art) || { label: 'Nicht erkannt' }).label)}</span>
+        <span class="pe-status">${esc(PE_STATUS[p.status] || p.status)}</span><span class="pe-zeit">${new Date(p.empfangen_am).toLocaleString('de-AT', { dateStyle: 'short', timeStyle: 'short' })}</span></header>
+      <div class="pe-betreff">${esc(p.betreff || '(ohne Betreff)')}</div>
+      ${chips.length ? `<div class="pe-chips">${chips.map(([l, v]) => `<span><small>${esc(l)}</small>${esc(v)}</span>`).join('')}</div>` : ''}
+      ${e.unterlagen && e.unterlagen.length ? `<div class="pe-unterlagen">Unterlagen: ${esc(e.unterlagen.join('; '))}</div>` : ''}
+      <div class="pe-ziel">${f ? `<button class="link" data-pe="oeffnen" data-id="${f.id}">${esc(f.kunde || '(ohne Namen)')}</button> <span class="grau">${esc(PE_ZU[p.zuordnung] || '')}</span>`
+        : p.zuordnung === 'mehrdeutig' ? '<span class="rot">Mehrere Förderungen passen – bitte wählen</span>' : '<span class="grau">Keine Förderung gefunden</span>'} ${wahl}</div>
+      ${(p.notizen || []).length ? `<ul class="pe-notizen">${p.notizen.map(n => `<li class="${n.startsWith('⚠') ? 'rot' : ''}">${esc(n)}</li>`).join('')}</ul>` : ''}
+      <details class="pe-text"><summary>Mailtext</summary><pre>${esc(p.text || '')}</pre></details>
+      ${bearbeiten && offen ? `<footer class="pe-fuss"><button class="btn btn-leise" data-pe="ignorieren" data-id="${p.id}">Ignorieren</button>
+        <button class="btn btn-primaer" data-pe="uebernehmen" data-id="${p.id}" ${f ? '' : 'disabled'}><svg><use href="#i-check"/></svg>Übernehmen</button></footer>` : ''}
+    </article>`;
+  }
+  function postAkteHtml(rec) {
+    const mails = (S.post || []).filter(p => p.foerderung_id === rec.id);
+    if (!mails.length) return '';
+    return `<section class="karte"><h3><svg><use href="#i-doc"/></svg>OeMAG-Mails</h3><div class="verlauf">${mails.map(p =>
+      `<div class="verlauf-zeile"><span class="verlauf-zeit">${new Date(p.empfangen_am).toLocaleDateString('de-AT')} · ${esc(PE_STATUS[p.status] || p.status)}</span>
+        <span>${esc((E.OEMAG.ARTEN.find(a => a.art === p.art) || { label: p.betreff }).label)}${(p.notizen || []).length ? ' – ' + esc(p.notizen.join(' · ')) : ''}</span></div>`).join('')}</div></section>`;
+  }
+  async function postDialog() {
+    dialog('OeMAG-Posteingang', '<p class="grau">wird geladen …</p>');
+    await postLaden();
+    if (S.postFehlt || !S.post) {
+      $('#dlg-inhalt').innerHTML = `<p><b>Der Posteingang ist in der Datenbank noch nicht eingerichtet.</b></p>
+        <p>Einmal <span class="mono">sql/oemag.sql</span> im Supabase-Dashboard unter <b>SQL Editor</b> ausführen – Anleitung in <span class="mono">docs/OEMAG-MAILS.md</span>.</p>`;
+      return;
+    }
+    const bearbeiten = darf('bearbeiten');
+    const zuPruefen = S.post.filter(p => p.status === 'offen' || p.status === 'vorschlag');
+    const zuletzt = S.post.filter(p => p.status === 'angewendet' || p.status === 'erledigt').slice(0, 25);
+    $('#dlg-inhalt').innerHTML = `
+      <p class="grau">Mails der OeMAG werden automatisch gelesen. EAG-Nr., Ticketnummer und FPJ sowie <b>Ticket gezogen, Ablehnung und
+        Nachforderung zur Endabrechnung</b> werden sofort übernommen; alles andere steht hier zum Bestätigen.</p>
+      ${bearbeiten ? `<section class="pe-einfuegen"><h3>Mail einfügen</h3>
+        <textarea id="pe-text" rows="5" placeholder="OeMAG-Mail hier einfügen – Betreff in die erste Zeile, darunter der Text"></textarea>
+        <div class="pe-einfuegen-fuss"><label class="klein grau">Mail vom <input type="date" id="pe-datum" value="${heute()}"></label>
+          <button class="btn btn-primaer" data-pe="einfuegen"><svg><use href="#i-bolt"/></svg>Auslesen und übernehmen</button></div></section>` : ''}
+      <h3 class="pe-titel">Zu prüfen <span class="g-n">${zuPruefen.length}</span></h3>
+      ${zuPruefen.length ? zuPruefen.map(p => peKarte(p, bearbeiten)).join('') : '<p class="grau">Nichts zu prüfen.</p>'}
+      ${zuletzt.length ? `<h3 class="pe-titel">Zuletzt übernommen</h3>${zuletzt.map(p => peKarte(p, bearbeiten)).join('')}` : ''}`;
+  }
+  async function sha256Text(t) {
+    const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
+    return Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  async function postAktion(b) {
+    const O = E.OEMAG;
+    const p = b.dataset.id ? (S.post || []).find(x => String(x.id) === b.dataset.id) : null;
+    try {
+      if (b.dataset.pe === 'oeffnen') { dialogZu(); oeffne(S.daten.find(d => d.id === b.dataset.id)); return; }
+      if (b.dataset.pe === 'ignorieren') { await Q.posteingangStatus(p.id, 'ignoriert'); toast('Ignoriert.'); }
+      if (b.dataset.pe === 'uebernehmen') {
+        const wahl = $(`[data-pe-wahl="${p.id}"]`);
+        const fid = p.foerderung_id || (wahl && wahl.value);
+        const f = S.daten.find(d => d.id === fid);
+        if (!f) { toast('Bitte zuerst die Förderung wählen.', 'fehler'); return; }
+        // Neu zugeordnet: Änderung für diese Förderung berechnen (alles, auch Vorschläge – du bestätigst ja)
+        const neu = fid !== p.foerderung_id ? O.aenderung(f, p.erkannt) : null;
+        const aend = neu ? peGesamt(neu.automatisch, neu.vorschlag) : peGesamt(p.status === 'vorschlag' ? {} : p.automatisch, p.vorschlag);
+        const patch = O.anwenden(f, aend);
+        const aendert = Object.keys(patch).some(k => JSON.stringify(patch[k]) !== JSON.stringify(f[k]));
+        const notizen = (neu || O.aenderung(f, p.erkannt)).notizen;
+        await Q.oemagAnwenden(p.id, aend, fid);
+        await laden(true);
+        toast(`${f.kunde}: ${aendert ? 'übernommen' : 'nichts geändert'}${notizen.length ? ' – ' + notizen.join(' · ') : ''}`, 'ok');
+      }
+      if (b.dataset.pe === 'einfuegen') {
+        const roh = $('#pe-text').value.trim();
+        if (!roh) { toast('Bitte zuerst eine Mail einfügen.', 'fehler'); return; }
+        const zeilen = roh.split('\n');
+        const betreff = zeilen[0].length <= 120 ? zeilen[0].trim() : '';
+        const text = betreff ? zeilen.slice(1).join('\n') : roh;
+        const r = O.verarbeiten({ betreff, text, datum: $('#pe-datum').value || heute() }, S.daten);
+        const hash = await sha256Text(betreff + '\n' + text);
+        const zeile = await Q.posteingangEinfuegen({
+          message_id: 'eingefuegt:' + hash, quelle: 'eingefuegt', empfangen_am: new Date().toISOString(), absender: '', betreff, text, sha256: hash,
+          art: r.erkannt.art, sicher: r.erkannt.sicher, erkannt: r.erkannt, foerderung_id: r.foerderung ? r.foerderung.id : null,
+          zuordnung: r.zuordnung, kandidaten: r.kandidaten, automatisch: r.automatisch, vorschlag: r.vorschlag, notizen: r.notizen,
+          status: r.status === 'angewendet' ? 'offen' : r.status
+        });
+        if (r.foerderung && Object.keys(r.automatisch).length) await Q.oemagAnwenden(zeile.id, r.automatisch);
+        await laden(true);
+        toast(`${r.erkannt.label}${r.foerderung ? ' → ' + r.foerderung.kunde : ' – keine Förderung gefunden'}${r.notizen.length ? ': ' + r.notizen.join(' · ') : ''}`, r.foerderung ? 'ok' : 'fehler');
+      }
+      await postDialog();
+    } catch (e) { toast(E.fehlerText(e), 'fehler'); }
+  }
+
   // ---------------------------------------------------------------
   // Sicherungen: jede Nacht automatisch (sql/archiv.sql + Edge Function foerder-taeglich).
   // Hier: ansehen, als Excel holen, mit heute vergleichen, einzelne Förderungen zurückholen.
@@ -1524,6 +1652,7 @@ Vortag: ${esc(a.vorher_sha256 || '–')}">${esc(kurzHash(a.sha256))}</td>
         case 'import': importDialog(); break;
         case 'nutzer': nutzerDialog(); break;
         case 'sicherungen': sicherungenDialog(); break;
+        case 'posteingang': postDialog(); break;
         case 'befehle': befehlspalette(); break;
         case 'darstellung': darstellungWeiter(); break;
         case 'tasten': tastenDialog(); break;
@@ -1552,6 +1681,7 @@ Vortag: ${esc(a.vorher_sha256 || '–')}">${esc(kurzHash(a.sha256))}</td>
     });
     $('#reiter').addEventListener('click', e => {
       const x = e.target.closest('[data-extra]');
+      if (x && x.dataset.extra === 'post') { postDialog(); return; }
       if (x) {
         S.extra = S.extra === x.dataset.extra ? '' : x.dataset.extra;
         if (S.extra === 'abgelehnt') S.ansicht = 'beendet';
@@ -1659,6 +1789,10 @@ Vortag: ${esc(a.vorher_sha256 || '–')}">${esc(kurzHash(a.sha256))}</td>
     $('#dialog').addEventListener('change', e => {
       if (e.target.id === 'imp-datei' && e.target.files[0]) importDatei(e.target.files[0]);
       else if (e.target.id === 'w-call' || e.target.id === 'w-alle') wuerfelAnzahl();
+      else if (e.target.dataset.peWahl) {
+        const k = $(`[data-pe="uebernehmen"][data-id="${e.target.dataset.peWahl}"]`);
+        if (k) k.disabled = !e.target.value;
+      }
       else nutzerAendern(e);
     });
     $('#dialog').addEventListener('click', e => {
@@ -1669,6 +1803,7 @@ Vortag: ${esc(a.vorher_sha256 || '–')}">${esc(kurzHash(a.sha256))}</td>
       else if (e.target.closest('#w-uebernehmen')) wuerfelUebernehmen();
       else if (e.target.closest('#pw-los')) passwortSpeichern();
       else if (e.target.closest('[data-sich]')) sicherungAktion(e.target.closest('[data-sich]'));
+      else if (e.target.closest('[data-pe]')) postAktion(e.target.closest('[data-pe]'));
       else nutzerAktion(e);
     });
 
@@ -1715,6 +1850,7 @@ Vortag: ${esc(a.vorher_sha256 || '–')}">${esc(kurzHash(a.sha256))}</td>
       ansicht('todo', 'Zu tun'), ansicht('warten', 'Wartet'), ansicht('fertig', 'Fertig'), ansicht('beendet', 'Beendet'), ansicht('alle', 'Alle (Tabelle)'),
       { gruppe: 'Befehle', icon: 'i-download', titel: 'Als Excel herunterladen', tun: exportieren },
       darf('admin') && { gruppe: 'Befehle', icon: 'i-history', titel: 'Sicherungen', tun: sicherungenDialog },
+      darf('bearbeiten') && { gruppe: 'Befehle', icon: 'i-doc', titel: 'OeMAG-Posteingang (Mail einfügen)', tun: postDialog },
       darf('admin') && { gruppe: 'Befehle', icon: 'i-users', titel: 'Nutzer & Rollen', tun: nutzerDialog },
       darf('admin') && { gruppe: 'Befehle', icon: 'i-upload', titel: 'Excel-Import', tun: importDialog },
       { gruppe: 'Befehle', icon: 'i-sun', titel: 'Darstellung wechseln (automatisch → hell → dunkel)', tun: darstellungWeiter },
@@ -1725,7 +1861,7 @@ Vortag: ${esc(a.vorher_sha256 || '–')}">${esc(kurzHash(a.sha256))}</td>
   function bpSuchen(q) {
     const teile = norm(q).split(/\s+/).filter(Boolean);
     const bearbeiten = darf('bearbeiten');
-    const text = d => norm([d.kunde, d.ort, d.plz, d.zaehlpunkt, d.projekt_nr, d.fpj, d.ticket, d.zieher, d.mitarbeiter].join(' '));
+    const text = d => norm([d.kunde, d.ort, d.plz, d.zaehlpunkt, d.projekt_nr, d.fpj, d.eag_nr, d.ticket, d.zieher, d.mitarbeiter].join(' '));
     const RANG = { ueberfaellig: 0, dringend: 1, bald: 2, ruhig: 3, unbekannt: 4 };
     const fr = d => E.fristen(d, heute())[0];
     let treffer = S.daten.filter(d => !d.geloescht_am);

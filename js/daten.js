@@ -29,7 +29,7 @@
     const archivRpc = ({ data, error }) => {
       if (error) {
         const e = new Error(fehlerText(error));
-        e.fehlt = error.code === 'PGRST202' || error.code === '42883' || /Could not find the function/i.test(error.message || '');
+        e.fehlt = ['PGRST202', 'PGRST205', '42883', '42P01'].includes(error.code) || /Could not find the (function|table)/i.test(error.message || '');
         throw e;
       }
       return data;
@@ -82,6 +82,19 @@
       async kontoAblehnen(mail) { pruefe(await sb.rpc('foerder_konto_ablehnen', { p_email: mail })); },
       async nutzerSpeichern(n) { return pruefe(await sb.from('foerder_nutzer').upsert(n).select().single()); },
       async nutzerLoeschen(mail) { pruefe(await sb.from('foerder_nutzer').delete().eq('email', mail)); },
+      // OeMAG-Posteingang (sql/oemag.sql) – fehlt die Einrichtung, wirft das mit e.fehlt = true
+      async posteingang() {
+        return archivRpc(await sb.from('foerder_posteingang').select('*').order('empfangen_am', { ascending: false }).limit(300));
+      },
+      async posteingangEinfuegen(zeile) { return archivRpc(await sb.from('foerder_posteingang').insert(zeile).select().single()); },
+      async posteingangStatus(id, status, foerderungId) {
+        const p = { status };
+        if (foerderungId !== undefined) p.foerderung_id = foerderungId;
+        archivRpc(await sb.from('foerder_posteingang').update(p).eq('id', id));
+      },
+      async oemagAnwenden(id, aenderung, foerderungId) {
+        archivRpc(await sb.rpc('foerder_oemag_anwenden', { p_id: id, p_aenderung: aenderung, p_foerderung: foerderungId || null }));
+      },
       // Tägliche Sicherungen (sql/archiv.sql) – fehlt die Einrichtung, wirft das mit e.fehlt = true
       async archivListe() { return archivRpc(await sb.rpc('foerder_archiv_liste')); },
       async archivTag(tag) { return archivRpc(await sb.rpc('foerder_archiv_tag', { p_tag: tag })) || []; },
@@ -153,6 +166,30 @@
     gestern[2].kunde = gestern[2].kunde + ' (alter Name)';
     gestern.push(Object.assign(kopie(gestern[0]), { id: neuId(), kunde: 'Gelöscht Gustav' }));
     const archiv = [{ tag: A.plusTage(A.heuteText(), -1), erstellt_am: jetzt(), daten: gestern, sha256: hashText('g'), vorher_sha256: hashText('v') }];
+    // Demo-Posteingang: drei OeMAG-Mails (Wortlaut wie echt, Nummern erfunden)
+    const post = [];
+    (function demoPost() {
+      const O = window.EAG_OEMAG;
+      if (!O) return;
+      const julia = daten.find(d => d.kunde === 'Strom Julia'), martin = daten.find(d => d.kunde === 'Hof Martin');
+      martin.eag_nr = 'EAG00051111';
+      const de = d => d.split('-').reverse().join('.');
+      const mails = [
+        { betreff: 'Ticketziehung', datum: A.plusTage(A.heuteText(), -1) + 'T15:04:40Z',
+          text: `Sehr geehrte(r) Förderwerberin/Förderwerber!\nIhr Ticket mit der Nummer 4b7e21 zum Einspeisezählpunkt ${julia.zaehlpunkt} wurde am 16.06.2026 um 17:04:35 Uhr von Ihnen gezogen.` },
+        { betreff: 'Nachforderung von Unterlagen', datum: A.plusTage(A.heuteText(), -2) + 'T08:12:00Z',
+          text: `Zu Ihrer Endabrechnung zu EAG00051111 mit der Zählpunktbezeichnung ${martin.zaehlpunkt} benötigen wir noch weitere Unterlagen/Informationen innerhalb der 4-Wochenfrist bis spätestens ${de(A.plusTage(A.heuteText(), 26))}\n\n* Leasingvertrag\n* Nachweis der Nettokapazität Stromspeicher\n\nHierzu loggen Sie sich bitte im EAG Portal ein!` },
+        { betreff: 'Fördervertrag', datum: A.plusTage(A.heuteText(), -3) + 'T10:00:00Z',
+          text: 'Ihr Fördervertrag zur Zählpunktbezeichnung AT0030000000000000000000030199999 steht im Portal bereit.' }
+      ];
+      mails.forEach((m, i) => {
+        const r = O.verarbeiten(m, daten);
+        post.push({ id: i + 1, message_id: 'demo-' + i, quelle: 'postfach', empfangen_am: m.datum, absender: 'noreply@oemag.at', betreff: m.betreff, text: m.text,
+          art: r.erkannt.art, sicher: r.erkannt.sicher, erkannt: r.erkannt, foerderung_id: r.foerderung ? r.foerderung.id : null, zuordnung: r.zuordnung,
+          kandidaten: r.kandidaten, automatisch: r.automatisch, vorschlag: r.vorschlag, notizen: r.notizen, status: r.status });
+        if (r.foerderung && Object.keys(r.automatisch).length) Object.assign(r.foerderung, O.anwenden(r.foerderung, r.automatisch), { geaendert_von: 'OeMAG-Mail' });
+      });
+    })();
     function logge(id, aktion, diff) { verlauf.unshift({ id: verlauf.length + 1, foerderung_id: id, zeit: jetzt(), von: ich.name, aktion, aenderungen: diff || {} }); }
     let authCb = null;
     let angemeldet = true;
@@ -188,6 +225,26 @@
       async nutzerSpeichern(n) { nutzer = nutzer.filter(x => x.email !== n.email).concat([n]); wartend = wartend.filter(k => k.email !== n.email); return kopie(n); },
       async nutzerLoeschen(mail) { nutzer = nutzer.filter(x => x.email !== mail); },
       async massenAnlegen(recs) { const out = []; for (const r of recs) out.push(await this.anlegen(r)); return out; },
+      async posteingang() { return kopie(post.slice().sort((a, b) => b.empfangen_am.localeCompare(a.empfangen_am))); },
+      async posteingangEinfuegen(zeile) {
+        if (post.some(p => p.message_id === zeile.message_id)) throw new Error('Diese Mail ist schon im Posteingang.');
+        const z = Object.assign({ id: post.length + 1, empfangen_am: jetzt(), status: 'offen', automatisch: {}, vorschlag: {}, notizen: [], kandidaten: [] }, kopie(zeile));
+        post.push(z); return kopie(z);
+      },
+      async posteingangStatus(id, status, foerderungId) {
+        const z = post.find(p => p.id === id); z.status = status; if (foerderungId !== undefined) z.foerderung_id = foerderungId;
+      },
+      async oemagAnwenden(id, aenderung, foerderungId) {
+        const z = post.find(p => p.id === id);
+        const fid = foerderungId || z.foerderung_id;
+        const r = daten.find(d => d.id === fid);
+        if (!r) throw new Error('Keine Förderung zugeordnet');
+        const patch = window.EAG_OEMAG.anwenden(r, aenderung);
+        if (Object.keys(patch).length) await this.aendern(fid, patch);
+        r.geaendert_von = 'OeMAG-Mail';
+        if (foerderungId && foerderungId !== z.foerderung_id) z.zuordnung = 'hand';
+        z.foerderung_id = fid; z.status = 'angewendet';
+      },
       async archivListe() { return archiv.map(a => ({ tag: a.tag, erstellt_am: a.erstellt_am, anzahl: a.daten.length, sha256: a.sha256, vorher_sha256: a.vorher_sha256, datei: a.tag + '.json', versendet_am: a.erstellt_am })); },
       async archivTag(tag) { const a = archiv.find(x => x.tag === tag); return a ? kopie(a.daten) : []; },
       async archivJetzt() {
@@ -206,6 +263,7 @@
   }
 
   window.EAG = Object.assign({}, A, {
+    OEMAG: window.EAG_OEMAG,
     fehlerText,
     quelle: /[?&]demo\b/.test(location.search) ? demoQuelle() : supabaseQuelle()
   });

@@ -36,6 +36,11 @@ Ab dann läuft alles jede Nacht um 02:15 (Sommerzeit 03:15).
 > Resend-Kontos zu. Für andere Empfänger in Resend die Domain `solpro.at` bestätigen und `MAIL_ABSENDER` setzen,
 > z. B. `EAG-Förderungen <foerderungen@solpro.at>`.
 
+### A2. OeMAG-Mails (sofort sinnvoll – „Mail einfügen“ geht ohne weitere Einrichtung)
+
+*SQL Editor* → Inhalt von [`sql/oemag.sql`](../sql/oemag.sql) → **Run**. Abholen aus dem Postfach:
+[`docs/OEMAG-MAILS.md`](OEMAG-MAILS.md) (einmalig M365-Admin).
+
 ### B. Revisionssicheres Protokoll (nach dem Call, ab 23.10.)
 
 *SQL Editor* → Inhalt von [`sql/vorschlag-revision.sql`](../sql/vorschlag-revision.sql) → **Run**.

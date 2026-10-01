@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/app.css?v=20">
+  <link rel="stylesheet" href="css/app.css?v=22">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -86,6 +86,7 @@
             <button class="menue-punkt" data-aktion="export"><svg><use href="#i-download"/></svg>Als Excel herunterladen</button>
             <button class="menue-punkt" data-aktion="nutzer" data-recht="admin"><svg><use href="#i-users"/></svg>Nutzer &amp; Rollen</button>
             <button class="menue-punkt" data-aktion="sicherungen" data-recht="admin"><svg><use href="#i-history"/></svg>Sicherungen</button>
+            <button class="menue-punkt" data-aktion="posteingang" data-recht="bearbeiten"><svg><use href="#i-doc"/></svg>OeMAG-Posteingang</button>
             <div class="menue-trenner"></div>
             <button class="menue-punkt" data-aktion="darstellung"><svg><use href="#i-sun"/></svg><span id="darstellung-text">Darstellung: automatisch</span></button>
             <button class="menue-punkt" data-aktion="tasten"><svg><use href="#i-bolt"/></svg>Tastenkürzel <kbd style="margin-left:auto">?</kbd></button>
@@ -158,9 +159,10 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
   <script src="js/config.js?v=1"></script>
-  <script src="js/ablauf.js?v=8"></script>
-  <script src="js/daten.js?v=9"></script>
+  <script src="js/ablauf.js?v=9"></script>
+  <script src="js/oemag.js?v=2"></script>
+  <script src="js/daten.js?v=10"></script>
   <script src="js/import.js?v=3"></script>
-  <script src="js/app.js?v=20"></script>
+  <script src="js/app.js?v=22"></script>
 </body>
 </html>

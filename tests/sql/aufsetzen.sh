@@ -8,6 +8,7 @@ $P -f tests/sql/supabase-stubs.sql
 sed -n '1,/^-- Mail an die Admins/p' sql/setup.sql | $P
 grep -v '^create extension' sql/archiv.sql | $P
 $P -f sql/vorschlag-revision.sql
+grep -v '^create extension' sql/oemag.sql | $P
 $P -f sql/v2/eag.sql
 $P -f sql/v2/eag.sql          # wiederholbar?
 echo "Datenbank aufgesetzt."

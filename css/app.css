@@ -689,3 +689,31 @@ body.demo .kopf::after { content: "Demo – keine echten Daten"; position: absol
 .a-laufend b { color: var(--ink); }
 .z-nochmal { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); font-weight: 500; }
 .tk-warn { font-size: 12px; font-weight: 500; color: var(--krit); }
+
+/* OeMAG-Posteingang */
+.pe-einfuegen { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--fl-2); margin-bottom: 16px; }
+.pe-einfuegen h3, .pe-titel { font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.pe-titel { margin: 18px 0 8px; }
+.pe-einfuegen textarea { width: 100%; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--fl); color: var(--ink); padding: 8px 10px; resize: vertical; font-size: 13px; }
+.pe-einfuegen textarea:focus { outline: none; border-color: var(--ink-2); box-shadow: var(--ring); }
+.pe-einfuegen-fuss { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pe-einfuegen-fuss input { height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--fl); color: var(--ink); padding: 0 6px; margin-left: 6px; }
+.pe-karte { border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; margin-bottom: 8px; background: var(--fl); display: grid; gap: 6px; }
+.pe-vorschlag, .pe-offen { border-left: 3px solid var(--warn); }
+.pe-ignoriert { opacity: .6; }
+.pe-kopf { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.pe-art { font-weight: 600; font-size: 13px; color: var(--ink); }
+.pe-sicher::after { content: "automatisch"; margin-left: 6px; font-size: 10.5px; font-weight: 500; color: var(--ok); background: var(--ok-soft); border-radius: 4px; padding: 1px 5px; }
+.pe-status { color: var(--mute); }
+.pe-zeit { margin-left: auto; color: var(--mute); font-variant-numeric: tabular-nums; }
+.pe-betreff { font-size: 13px; color: var(--ink-2); }
+.pe-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.pe-chips span { display: inline-flex; gap: 5px; align-items: baseline; font-size: 12px; font-family: var(--mono); background: var(--fl-3); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
+.pe-chips small { font-family: var(--f); color: var(--mute); font-size: 10.5px; }
+.pe-unterlagen { font-size: 12.5px; color: var(--warn); }
+.pe-ziel { font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pe-wahl { height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--fl); color: var(--ink); max-width: 100%; }
+.pe-notizen { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--ink-2); }
+.pe-text summary { font-size: 12px; color: var(--mute); cursor: pointer; }
+.pe-text pre { white-space: pre-wrap; font-family: var(--f); font-size: 12px; color: var(--ink-2); background: var(--fl-2); border-radius: 6px; padding: 8px; max-height: 220px; overflow: auto; }
+.pe-fuss { display: flex; justify-content: flex-end; gap: 6px; }

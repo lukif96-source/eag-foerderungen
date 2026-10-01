@@ -58,6 +58,8 @@
     frueher_abgelehnt: 'Früher abgelehnt im Call',
     frueher_abgelehnt_am: 'Früher abgelehnt am',
     nochmal_ansuchen: 'Nochmal ansuchen (in der Excel orange)',
+    nachforderung_abrechnung: 'Nachforderung zur Endabrechnung',
+    nachgereicht_abrechnung: 'Endabrechnung: Unterlagen nachgereicht',
     ticket_uhrzeit: 'Ticket gezogen um',
     zieher_geplant: 'Ticket-Zieher laut Würfel'
   };
@@ -102,7 +104,7 @@
   const FELDER = [
     'jahr', 'programm', 'art', 'foerdercall', 'mitarbeiter', 'zieher', 'kunde', 'geburtsdatum', 'vollmacht',
     'strasse', 'plz', 'ort', 'kg_gst', 'zaehlpunkt', 'mail', 'projekt_nr', 'kwp', 'modulflaeche', 'einspeisung',
-    'wr_leistung', 'speicher', 'anbringung', 'zeitplan', 'ticket', 'fpj', 'schritte', 'offene_punkte', 'info'
+    'wr_leistung', 'speicher', 'anbringung', 'zeitplan', 'ticket', 'fpj', 'eag_nr', 'schritte', 'offene_punkte', 'info'
   ];
 
   function leer(v) { return v === null || v === undefined || (typeof v === 'string' && v.trim() === ''); }
@@ -146,7 +148,7 @@
     const s = f.schritte || {};
     // Ausgezahlt ist ausgezahlt: fertig, egal was davor fehlt oder sonst angehakt ist
     if (!leer(s.ausgezahlt)) {
-      return { erledigt: SCHRITTE.map(() => true), hoechster: SCHRITTE.length - 1, naechster: -1, luecken: [], ende: null, nachforderungOffen: false, fertig: true };
+      return { erledigt: SCHRITTE.map(() => true), hoechster: SCHRITTE.length - 1, naechster: -1, luecken: [], ende: null, nachforderungOffen: false, nachforderungAbrechnungOffen: false, fertig: true };
     }
     const ende = ENDE.find(e => !leer(s[e.key])) || null;
     const erledigt = SCHRITTE.map(x => !!schrittWert(f, x.key, heute));
@@ -156,7 +158,9 @@
     const luecken = [];
     for (let i = 0; i < hoechster; i++) if (!erledigt[i] && !SCHRITTE[i].auto && !SCHRITTE[i].neu) luecken.push(i);
     const nachforderungOffen = !ende && !leer(s.nachforderung) && leer(s.nachgereicht) && !erledigt[IDX.vertrag_erhalten];
-    return { erledigt, hoechster, naechster, luecken, ende, nachforderungOffen, fertig: !ende && naechster === -1 };
+    // Nachforderung der OeMAG zur Endabrechnung (eigene 4-Wochen-Frist, nur übers Portal)
+    const nachforderungAbrechnungOffen = !ende && !leer(s.nachforderung_abrechnung) && leer(s.nachgereicht_abrechnung);
+    return { erledigt, hoechster, naechster, luecken, ende, nachforderungOffen, nachforderungAbrechnungOffen, fertig: !ende && naechster === -1 };
   }
 
   // Was ist jetzt konkret zu tun? (Nachforderung geht vor dem Warten auf den Vertrag)
@@ -165,6 +169,10 @@
     if (st.ende || st.fertig) return null;
     if (st.nachforderungOffen) {
       return { key: 'nachgereicht', todo: 'Unterlagen nachreichen', knopf: 'Nachgereicht', kurz: 'Nachreichen', phase: 'call', neben: true };
+    }
+    if (st.nachforderungAbrechnungOffen) {
+      return { key: 'nachgereicht_abrechnung', todo: 'Unterlagen zur Endabrechnung nachreichen', knopf: 'Nachgereicht', kurz: 'Nachreichen (Abrechnung)',
+        phase: 'abrechnung', neben: true, hilfe: 'Nur über das EAG-Portal – per Mail oder Post zählt es nicht.' };
     }
     return SCHRITTE[st.naechster];
   }
@@ -211,6 +219,9 @@
     }
     if (st.nachforderungOffen && istDatum(s.nachforderung)) {
       dazu('nachforderung', 'Unterlagen nachreichen', plusTage(s.nachforderung, 28), '4 Wochen ab Nachforderung');
+    }
+    if (st.nachforderungAbrechnungOffen && istDatum(s.nachforderung_abrechnung)) {
+      dazu('nachforderung_abrechnung', 'Unterlagen zur Endabrechnung nachreichen', plusTage(s.nachforderung_abrechnung, 28), '4 Wochen ab Nachforderung, nur übers Portal');
     }
     if (!offen('vertrag_erhalten')) {
       const ibn = inbetriebnahmeFrist(f);
@@ -464,7 +475,8 @@
       'Kunde': d.kunde, 'Geb. Dat': datumDE(d.geburtsdatum), 'Vollmacht': d.vollmacht, 'Straße': d.strasse, 'PLZ': d.plz, 'Ort': d.ort,
       'KG Grundstücksnummer': d.kg_gst, 'Einspeisezählpunkt': d.zaehlpunkt, 'Mail': d.mail, 'Projekt': d.projekt_nr,
       'Größe kWp': d.kwp, 'Modulfläche m²': d.modulflaeche, 'Einspeisung': d.einspeisung, 'WR Nennleistung': d.wr_leistung,
-      'Speicher': d.speicher, 'Anbringung': d.anbringung, 'Zeitplan': d.zeitplan, 'Art': d.art, 'Ticket': d.ticket, 'FPJ': d.fpj
+      'Speicher': d.speicher, 'Anbringung': d.anbringung, 'Zeitplan': d.zeitplan, 'Art': d.art, 'Ticket': d.ticket, 'FPJ': d.fpj,
+      'EAG-Nr.': d.eag_nr || ''
     };
     SCHRITTE.filter(x => !x.auto).forEach(x => { const w = s[x.key]; z[x.label] = w ? (w === '✓' ? '✓' : datumDE(w)) : ''; });
     Object.keys(NEBEN).forEach(k => { const w = s[k]; z[NEBEN[k]] = w ? (istDatum(w) ? datumDE(w) : listeDE(w)) : ''; });

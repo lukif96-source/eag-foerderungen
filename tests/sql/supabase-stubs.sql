@@ -2,6 +2,7 @@
 do $$ begin create role anon; exception when duplicate_object then null; end $$;
 do $$ begin create role authenticated; exception when duplicate_object then null; end $$;
 do $$ begin create role service_role; exception when duplicate_object then null; end $$;
+alter role service_role bypassrls;   -- wie in Supabase
 create schema if not exists auth;
 create table if not exists auth.users (id uuid primary key, email text, created_at timestamptz default now());
 create or replace function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('test.uid', true), '')::uuid $$;

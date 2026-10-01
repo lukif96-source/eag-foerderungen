@@ -77,6 +77,13 @@ Tastatur: **⌘K / Strg+K** Suchen und Befehle (Kunde finden, nächsten Schritt 
 erledigen · **N** neuer Kunde · **⌘S** speichern · **⌘Z** letztes Erledigen rückgängig · **?** Übersicht.
 Jedes Schnell-Erledigen zeigt 8 Sekunden „Rückgängig“.
 
+## OeMAG-Mails
+Ticket gezogen, Ablehnung und Nachforderung zur Endabrechnung werden aus den OeMAG-Mails automatisch übernommen
+(Ticketnummer + Uhrzeit, EAG-Nr., Frist und Unterlagen), andere Mails als Vorschlag mit einem Klick. Zuordnung über
+EAG-Nr., FPJ oder Zählpunkt; es wird nie überschrieben, Widersprüche kommen zur Prüfung. ☰ → **OeMAG-Posteingang**
+(auch „Mail einfügen“). Einrichtung und Regeln: `docs/OEMAG-MAILS.md`. Neu: Feld **EAG-Nr.** und Schritt
+**Nachforderung zur Endabrechnung** (eigene 4-Wochen-Frist).
+
 ## Tägliche Sicherung
 Jede Nacht (02:15) wird die ganze Förderliste gesichert: unveränderbar in der Datenbank (`foerder_archiv`, mit
 SHA-256, verkettet mit dem Vortag), als Datei im privaten Storage und per Mail an die Admins (CSV für Excel + JSON).

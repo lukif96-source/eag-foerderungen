@@ -315,11 +315,13 @@ test('Neu ansuchen löscht auch Uhrzeit und Würfel-Vermerk des alten Tickets', 
 });
 
 // ── Export und täglicher Lauf ─────────────────────────────────────
-test('Edge Function foerder-taeglich nutzt dieselben Regeln (Kopie von js/ablauf.js ist aktuell)', () => {
+test('Edge Functions nutzen dieselben Regeln (Kopien aus js/ sind aktuell)', () => {
   const fs = require('node:fs'), path = require('node:path');
-  const original = fs.readFileSync(path.join(__dirname, '../js/ablauf.js'), 'utf8');
-  const kopie = fs.readFileSync(path.join(__dirname, '../supabase/functions/foerder-taeglich/ablauf.js'), 'utf8');
-  assert.equal(kopie, original, 'Bitte js/ablauf.js nach supabase/functions/foerder-taeglich/ablauf.js kopieren');
+  [['foerder-taeglich', 'ablauf.js'], ['oemag', 'ablauf.js'], ['oemag', 'oemag.js']].forEach(([fn, datei]) => {
+    const original = fs.readFileSync(path.join(__dirname, '../js', datei), 'utf8');
+    const kopie = fs.readFileSync(path.join(__dirname, '../supabase/functions', fn, datei), 'utf8');
+    assert.equal(kopie, original, `Bitte js/${datei} nach supabase/functions/${fn}/ kopieren`);
+  });
 });
 
 test('Export-Zeile: Datum deutsch, Ticket-Uhrzeit, nächste Frist', () => {
@@ -391,4 +393,18 @@ test('Ticket am Tag danach nachgetragen: Datum ist trotzdem der Calltag', () => 
   assert.equal(p.schritte.ticket_uhrzeit, undefined);
   // ohne bekannten Call: das übergebene Datum
   assert.equal(A.ticketGezogen(basis({ projekt: '✓' }, { foerdercall: '' }), 'Bianca', '2026-10-09', '').schritte.ticket, '2026-10-09');
+});
+
+test('Nachforderung zur Endabrechnung: eigene Aufgabe und 4-Wochen-Frist, nach dem Nachreichen weg', () => {
+  const alle = Object.fromEntries(A.SCHRITTE.filter(s => !s.auto && s.key !== 'ausgezahlt').map(s => [s.key, '2026-07-01']));
+  const f = basis(Object.assign({}, alle, { nachforderung_abrechnung: '2026-08-03' }));
+  const st = A.status(f, '2026-08-10');
+  assert.equal(st.nachforderungAbrechnungOffen, true);
+  assert.equal(A.aufgabe(f, st).key, 'nachgereicht_abrechnung');
+  const [fr] = A.fristen(f, '2026-08-10');
+  assert.equal(fr.art, 'nachforderung_abrechnung');
+  assert.equal(fr.datum, '2026-08-31');
+  f.schritte.nachgereicht_abrechnung = '2026-08-20';
+  assert.equal(A.aufgabe(f).key, 'ausgezahlt');           // wieder: Auszahlung abwarten
+  assert.equal(A.fristen(f, '2026-08-21').some(x => x.art === 'nachforderung_abrechnung'), false);
 });

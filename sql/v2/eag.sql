@@ -34,22 +34,26 @@ do $$ begin
     'projekt', 'ticket', 'eingereicht', 'nachforderung', 'nachgereicht',
     'vertrag_erhalten', 'vertrag_versendet', 'verlaengert_bis', 'inbetriebnahme', 'herkunftsnachweis',
     'rechnung', 'zahlung', 'abgeschlossen', 'ausgezahlt',
-    'abgelehnt', 'zurueckgezogen', 'erloschen');
+    'abgelehnt', 'zurueckgezogen', 'erloschen', 'nachforderung_abrechnung', 'nachgereicht_abrechnung');
 exception when duplicate_object then null; end $$;
+alter type eag.schritt add value if not exists 'nachforderung_abrechnung';
+alter type eag.schritt add value if not exists 'nachgereicht_abrechnung';
 -- Zustand = was als Nächstes passieren muss (bzw. wie es geendet hat)
 do $$ begin
   create type eag.status as enum (
     'daten_fehlen', 'projekt_anlegen', 'ticket_ziehen', 'antrag_einreichen', 'nachreichen',
     'warten_vertrag', 'vertrag_versenden', 'in_betrieb_nehmen', 'econtrol_registrieren',
     'rechnung_hochladen', 'zahlung_hochladen', 'endabrechnung_einreichen', 'warten_auszahlung',
-    'ausgezahlt', 'abgelehnt', 'zurueckgezogen', 'erloschen');
+    'ausgezahlt', 'abgelehnt', 'zurueckgezogen', 'erloschen', 'nachreichen_abrechnung');
 exception when duplicate_object then null; end $$;
+alter type eag.status add value if not exists 'nachreichen_abrechnung';
 do $$ begin
   create type eag.phase as enum ('vorbereitung', 'call', 'zusage', 'umsetzung', 'abrechnung', 'fertig', 'beendet');
 exception when duplicate_object then null; end $$;
 do $$ begin
-  create type eag.frist_art as enum ('ticket', 'antrag', 'nachforderung', 'inbetriebnahme', 'endabrechnung');
+  create type eag.frist_art as enum ('ticket', 'antrag', 'nachforderung', 'inbetriebnahme', 'endabrechnung', 'nachforderung_abrechnung');
 exception when duplicate_object then null; end $$;
+alter type eag.frist_art add value if not exists 'nachforderung_abrechnung';
 do $$ begin
   create type eag.frist_stufe as enum ('ueberfaellig', 'dringend', 'bald', 'ruhig', 'unbekannt');
 exception when duplicate_object then null; end $$;
@@ -122,6 +126,7 @@ create table if not exists eag.antrag (
   call_start        date references eag.foerdercall (start) on update cascade,
   ticket_nr         text not null default '',
   fpj               text not null default '',          -- Projektnummer im EAG-Portal
+  eag_nr            text not null default '',          -- Einreichungsnummer (EAG00052982), steht in jeder OeMAG-Mail
   zieher            text not null default '',          -- wer das Ticket gezogen hat (vorher: gewürfelt)
   zieher_geplant    text not null default '',          -- gewürfelt, falls jemand anderer gezogen hat
   ticket_uhrzeit    time,
@@ -132,7 +137,9 @@ create table if not exists eag.antrag (
   geaendert_am      timestamptz not null default now(),
   unique (projekt_id, versuch)
 );
+alter table eag.antrag add column if not exists eag_nr text not null default '';
 create index if not exists antrag_call_idx on eag.antrag (call_start);
+create index if not exists antrag_eag_nr_idx on eag.antrag (eag_nr) where eag_nr <> '';
 create index if not exists antrag_vorgaenger_idx on eag.antrag (vorgaenger_id);
 
 -- Projektion: aktueller Stand je Schritt. Wird NUR vom Ereignis-Trigger geschrieben.
@@ -366,9 +373,11 @@ returns int language sql immutable set search_path = '' as $$
 $$;
 
 -- Stand eines Antrags am Stichtag: Status, Phase, erledigte Hauptschritte, nächster Schritt, Lücken
+drop function if exists eag.stand(uuid, date) cascade;   -- Rückgabetyp kann sich ändern; Sichten werden unten neu angelegt
 create or replace function eag.stand(p_antrag uuid, p_heute date default current_date,
   out status eag.status, out phase eag.phase, out erledigt boolean[], out naechster int, out hoechster int,
-  out luecken int[], out nachforderung_offen boolean, out daten_fehlen text[], out antrag_daten_fehlen text[])
+  out luecken int[], out nachforderung_offen boolean, out nachforderung_abrechnung_offen boolean,
+  out daten_fehlen text[], out antrag_daten_fehlen text[])
 language plpgsql stable security definer set search_path = '' as $$
 declare
   a eag.antrag; p eag.projekt; k eag.kunde;
@@ -407,7 +416,7 @@ begin
   if s ? 'ausgezahlt' then
     status := 'ausgezahlt'; phase := 'fertig';
     erledigt := array_fill(true, array[12]); naechster := -1; hoechster := 11; luecken := array[]::int[];
-    nachforderung_offen := false; daten_fehlen := array[]::text[];
+    nachforderung_offen := false; nachforderung_abrechnung_offen := false; daten_fehlen := array[]::text[];
     return;
   end if;
 
@@ -442,9 +451,11 @@ begin
     if not erledigt[i] and not ((i - 1) = any (auto_neu)) then luecken := luecken || (i - 1); end if;
   end loop;
   nachforderung_offen := ende is null and s ? 'nachforderung' and not s ? 'nachgereicht' and not erledigt[5];
+  nachforderung_abrechnung_offen := ende is null and s ? 'nachforderung_abrechnung' and not s ? 'nachgereicht_abrechnung';
 
   if ende is not null then status := ende::eag.status; phase := 'beendet';
   elsif nachforderung_offen then status := 'nachreichen'; phase := 'call';
+  elsif nachforderung_abrechnung_offen then status := 'nachreichen_abrechnung'; phase := 'abrechnung';
   elsif naechster = -1 then status := 'ausgezahlt'; phase := 'fertig';
   else status := zustand[naechster + 1]::eag.status; phase := phasen[naechster + 1]::eag.phase;
   end if;
@@ -477,6 +488,10 @@ begin
   if st.nachforderung_offen and (s ->> 'nachforderung') ~ '^\d{4}-\d{2}-\d{2}$' then
     aus := aus || jsonb_build_object('art', 'nachforderung', 'label', 'Unterlagen nachreichen',
       'datum', (s ->> 'nachforderung')::date + 28, 'hinweis', '4 Wochen ab Nachforderung', 'g', false);
+  end if;
+  if st.nachforderung_abrechnung_offen and (s ->> 'nachforderung_abrechnung') ~ '^\d{4}-\d{2}-\d{2}$' then
+    aus := aus || jsonb_build_object('art', 'nachforderung_abrechnung', 'label', 'Unterlagen zur Endabrechnung nachreichen',
+      'datum', (s ->> 'nachforderung_abrechnung')::date + 28, 'hinweis', '4 Wochen ab Nachforderung, nur übers Portal', 'g', false);
   end if;
   if s ? 'vertrag_erhalten' then
     monate := case when p.kwp > 100 then 12 else 6 end;
@@ -783,11 +798,12 @@ begin
     returning id into aid;
   end if;
   update eag.antrag set programm = f.programm, art = eag.legacy_art(f.art), ticket_nr = f.ticket, fpj = f.fpj,
+    eag_nr = coalesce(to_jsonb(f) ->> 'eag_nr', ''),   -- Spalte kommt aus sql/oemag.sql
     zieher = f.zieher, zieher_geplant = coalesce(f.schritte ->> 'zieher_geplant', ''),
     ticket_uhrzeit = case when (f.schritte ->> 'ticket_uhrzeit') ~ '^\d{2}:\d{2}(:\d{2})?$' then (f.schritte ->> 'ticket_uhrzeit')::time end,
     offene_punkte = f.offene_punkte, info = f.info, geloescht_am = f.geloescht_am
-  where id = aid and (programm, art, ticket_nr, fpj, zieher, zieher_geplant, offene_punkte, info, geloescht_am)
-    is distinct from (f.programm, eag.legacy_art(f.art), f.ticket, f.fpj, f.zieher, coalesce(f.schritte ->> 'zieher_geplant', ''),
+  where id = aid and (programm, art, ticket_nr, fpj, eag_nr, zieher, zieher_geplant, offene_punkte, info, geloescht_am)
+    is distinct from (f.programm, eag.legacy_art(f.art), f.ticket, f.fpj, coalesce(to_jsonb(f) ->> 'eag_nr', ''), f.zieher, coalesce(f.schritte ->> 'zieher_geplant', ''),
                       f.offene_punkte, f.info, f.geloescht_am);
 
   -- Schritte: Unterschiede als Ereignisse
@@ -851,7 +867,7 @@ end $$;
 create or replace view eag.antrag_stand with (security_invoker = true) as
 select a.id, a.projekt_id, a.versuch, a.vorgaenger_id, a.programm, a.art, a.call_start,
        eag.call_ende(a.call_start) as call_ende,
-       a.ticket_nr, a.fpj, a.zieher, a.zieher_geplant, a.ticket_uhrzeit, a.offene_punkte, a.info, a.geloescht_am, a.geaendert_am,
+       a.ticket_nr, a.fpj, a.eag_nr, a.zieher, a.zieher_geplant, a.ticket_uhrzeit, a.offene_punkte, a.info, a.geloescht_am, a.geaendert_am,
        k.name as kunde, k.mail, p.projekt_nr, p.strasse, p.plz, p.ort, p.zaehlpunkt, p.zaehlpunkt_ok, p.kwp, p.speicher, p.mitarbeiter,
        st.status, st.phase, st.erledigt, st.naechster, st.hoechster, st.luecken, st.nachforderung_offen,
        st.daten_fehlen, st.antrag_daten_fehlen,

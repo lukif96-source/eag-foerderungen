@@ -41,6 +41,10 @@ function erzeuge(i) {
     s.nachforderung = tage(s.eingereicht === '✓' ? (call || '2026-01-10') : s.eingereicht, 5 + Math.floor(zufall() * 20));
     if (zufall() < 0.4) s.nachgereicht = tage(s.nachforderung, 10);
   }
+  if (s.abgeschlossen && zufall() < 0.35) {
+    s.nachforderung_abrechnung = tage(s.abgeschlossen === '✓' ? '2027-03-01' : s.abgeschlossen, 10 + Math.floor(zufall() * 30));
+    if (zufall() < 0.4) s.nachgereicht_abrechnung = tage(s.nachforderung_abrechnung, 12);
+  }
   if (s.vertrag_erhalten && zufall() < 0.15) s.verlaengert_bis = zufall() < 0.2 ? '✓' : tage(d, 200);
   if (zufall() < 0.12) s[eins(['abgelehnt', 'zurueckgezogen', 'erloschen'])] = zufall() < 0.3 ? '✓' : tage(d, 3);
   return {
@@ -62,7 +66,8 @@ const STATUS = {
 };
 function erwartet(f, heute) {
   const st = A.status(f, heute);
-  const status = st.fertig ? 'ausgezahlt' : st.ende ? st.ende.key : st.nachforderungOffen ? 'nachreichen' : STATUS[A.SCHRITTE[st.naechster].key];
+  const status = st.fertig ? 'ausgezahlt' : st.ende ? st.ende.key : st.nachforderungOffen ? 'nachreichen'
+    : st.nachforderungAbrechnungOffen ? 'nachreichen_abrechnung' : STATUS[A.SCHRITTE[st.naechster].key];
   return {
     status, erledigt: st.erledigt, naechster: st.naechster, hoechster: st.hoechster, luecken: st.luecken,
     fristen: A.fristen(f, heute).map(x => [x.art, x.datum, x.stufe, x.geschaetzt])
