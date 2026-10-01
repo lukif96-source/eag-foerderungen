@@ -216,7 +216,7 @@ body.demo .kopf::after { content: "DEMO – keine echten Daten"; position: absol
 .karte-ablauf { position: sticky; top: 0; }
 .felder { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 
-.feld { display: grid; gap: 5px; min-width: 0; }
+.feld { display: grid; gap: 5px; min-width: 0; align-content: start; }
 .feld > span { font-size: 12px; font-weight: 500; color: var(--text-2); }
 .feld.breit { grid-column: span 2; }
 .feld.schmal input { max-width: 140px; }
