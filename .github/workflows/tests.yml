@@ -49,3 +49,19 @@ jobs:
           node-version: 22
       - run: tests/sql/aufsetzen.sh
       - run: node tests/sql/paritaet.js 1000
+
+  # Dashboard (web/): Typprüfung und statischer Build
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run build

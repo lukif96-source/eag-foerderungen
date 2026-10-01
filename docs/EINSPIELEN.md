@@ -52,7 +52,7 @@ Danach protokolliert die nächtliche Funktion auch überfällige Fristen.
 2. Einmal übernehmen: `select * from eag.migrieren();` → „übernommen“ = Anzahl der Förderungen, „fehler“ = 0.
    Ab dann spiegelt ein Trigger jede Änderung sofort. Fehler beim Spiegeln stehen in `eag.sync_fehler` und
    **brechen das Speichern in der App nie ab**.
-3. Für das neue Dashboard: *Project Settings* → *API* → **Exposed schemas** → `eag` hinzufügen.
+3. Für das neue Dashboard ([`web/`](../web/README.md)): *Project Settings* → *API* → **Exposed schemas** → `eag` hinzufügen.
 4. Neue Rolle **„vertrieb“** (Nutzer & Rollen): sieht nur Kunden, bei denen er als Mitarbeiter eingetragen ist.
 
 Was v2 abbildet: Kunde → Projekt (Anlage, Brücke zum Messtool über die Projektnummer) → Antrag (je Call ein

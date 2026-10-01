@@ -9,6 +9,8 @@ wo der Fördervertrag steht, was abgerechnet ist.
 - Statische Web-App ohne Build (`index.html`, `css/`, `js/`), gehostet über GitHub Pages.
 - Daten liegen in Supabase (Projekt `iuxklqcpexoziqxrohwa`), geschützt durch Login + Row Level Security.
 - **In diesem Repo stehen keine Kundendaten.** Excel-Dateien sind per `.gitignore` ausgeschlossen.
+- `web/`: neues **EAG-Timeline-Dashboard** (Next.js, statischer Export) auf dem Datenmodell v2 (`sql/v2/eag.sql`).
+  Ansehen ohne Datenbank mit `?demo` – siehe [web/README.md](web/README.md).
 
 ## Einrichtung
 Bereits erledigt (2026-09-28): Tabellen aus `sql/setup.sql` angelegt, Admin = l.fischereder@solpro.at.

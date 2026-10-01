@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+/* Dieselben Token wie die App (css/app.css) und das Messtool (pro.css). Farbe trägt nur Bedeutung. */
+:root {
+  --bg: #F7F7F8; --fl: #FFFFFF; --fl-2: #FAFAFA; --fl-3: #F4F4F5;
+  --ink: #18181B; --ink-2: #3F3F46; --mute: #71717A; --dim: #A1A1AA;
+  --line: #E4E4E7; --line-2: #F0F0F2; --line-3: #D4D4D8;
+  --pri-bg: #18181B; --pri-fg: #FFFFFF; --pri-hover: #3F3F46;
+  --ok: #15803D; --ok-soft: #ECFDF3; --ok-line: #BBF7D0;
+  --warn: #B45309; --warn-soft: #FFF7E6; --warn-line: #FDE2B4;
+  --krit: #C8261C; --krit-soft: #FEF1F0; --krit-line: #F8C9C4;
+  --brand: #93BD14; --brand-ink: #FFFFFF;
+  --overlay: rgba(9, 9, 11, .38);
+  --sh-1: 0 1px 2px rgba(16, 16, 20, .05);
+  --sh-3: 0 24px 64px rgba(16, 16, 20, .18), 0 2px 6px rgba(16, 16, 20, .06);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0B0B0C; --fl: #131315; --fl-2: #161618; --fl-3: #1C1C1F;
+    --ink: #EDEDEF; --ink-2: #C9C9CE; --mute: #8B8B93; --dim: #5F5F67;
+    --line: #26262A; --line-2: #1E1E21; --line-3: #333338;
+    --pri-bg: #EDEDEF; --pri-fg: #0B0B0C; --pri-hover: #FFFFFF;
+    --ok: #3FB950; --ok-soft: rgba(63, 185, 80, .12); --ok-line: rgba(63, 185, 80, .35);
+    --warn: #D29922; --warn-soft: rgba(210, 153, 34, .12); --warn-line: rgba(210, 153, 34, .35);
+    --krit: #F85149; --krit-soft: rgba(248, 81, 73, .12); --krit-line: rgba(248, 81, 73, .38);
+    --brand: #9CC31C; --brand-ink: #0B0B0C; --overlay: rgba(0, 0, 0, .6);
+    --sh-1: 0 1px 2px rgba(0, 0, 0, .4); --sh-3: 0 24px 64px rgba(0, 0, 0, .6);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0B0B0C; --fl: #131315; --fl-2: #161618; --fl-3: #1C1C1F;
+  --ink: #EDEDEF; --ink-2: #C9C9CE; --mute: #8B8B93; --dim: #5F5F67;
+  --line: #26262A; --line-2: #1E1E21; --line-3: #333338;
+  --pri-bg: #EDEDEF; --pri-fg: #0B0B0C; --pri-hover: #FFFFFF;
+  --ok: #3FB950; --ok-soft: rgba(63, 185, 80, .12); --ok-line: rgba(63, 185, 80, .35);
+  --warn: #D29922; --warn-soft: rgba(210, 153, 34, .12); --warn-line: rgba(210, 153, 34, .35);
+  --krit: #F85149; --krit-soft: rgba(248, 81, 73, .12); --krit-line: rgba(248, 81, 73, .38);
+  --brand: #9CC31C; --brand-ink: #0B0B0C; --overlay: rgba(0, 0, 0, .6);
+  --sh-1: 0 1px 2px rgba(0, 0, 0, .4); --sh-3: 0 24px 64px rgba(0, 0, 0, .6);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace;
+  --color-bg: var(--bg); --color-fl: var(--fl); --color-fl-2: var(--fl-2); --color-fl-3: var(--fl-3);
+  --color-ink: var(--ink); --color-ink-2: var(--ink-2); --color-mute: var(--mute); --color-dim: var(--dim);
+  --color-line: var(--line); --color-line-2: var(--line-2); --color-line-3: var(--line-3);
+  --color-pri: var(--pri-bg); --color-pri-fg: var(--pri-fg); --color-pri-hover: var(--pri-hover);
+  --color-ok: var(--ok); --color-ok-soft: var(--ok-soft); --color-ok-line: var(--ok-line);
+  --color-warn: var(--warn); --color-warn-soft: var(--warn-soft); --color-warn-line: var(--warn-line);
+  --color-krit: var(--krit); --color-krit-soft: var(--krit-soft); --color-krit-line: var(--krit-line);
+  --color-brand: var(--brand); --color-brand-ink: var(--brand-ink);
+  --shadow-1: var(--sh-1); --shadow-3: var(--sh-3);
+}
+
+/* In @layer base, damit Tailwind-Klassen (Schatten, Ringe) Vorrang haben */
+@layer base {
+  html, body { background: var(--bg); color: var(--ink); }
+  body { font-family: var(--font-sans); font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: antialiased; font-size: 14px; }
+  ::selection { background: color-mix(in srgb, var(--ink) 16%, transparent); }
+  :focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 14%, transparent); }
+}
+.tabular { font-variant-numeric: tabular-nums; }
+.schraffur { background: repeating-linear-gradient(-45deg, var(--dim) 0 2px, transparent 2px 5px); }
+@keyframes puls { 50% { opacity: .4; } }
+.puls { animation: puls 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

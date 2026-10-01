@@ -869,7 +869,7 @@ select a.id, a.projekt_id, a.versuch, a.vorgaenger_id, a.programm, a.art, a.call
        eag.call_ende(a.call_start) as call_ende,
        a.ticket_nr, a.fpj, a.eag_nr, a.zieher, a.zieher_geplant, a.ticket_uhrzeit, a.offene_punkte, a.info, a.geloescht_am, a.geaendert_am,
        k.name as kunde, k.mail, p.projekt_nr, p.strasse, p.plz, p.ort, p.zaehlpunkt, p.zaehlpunkt_ok, p.kwp, p.speicher, p.mitarbeiter,
-       st.status, st.phase, st.erledigt, st.naechster, st.hoechster, st.luecken, st.nachforderung_offen,
+       st.status, st.phase, st.erledigt, st.naechster, st.hoechster, st.luecken, st.nachforderung_offen, st.nachforderung_abrechnung_offen,
        st.daten_fehlen, st.antrag_daten_fehlen,
        (select jsonb_agg(jsonb_build_object('schritt', x.schritt, 'datum', x.datum) order by x.schritt)
           from eag.antrag_schritt x where x.antrag_id = a.id) as schritte,

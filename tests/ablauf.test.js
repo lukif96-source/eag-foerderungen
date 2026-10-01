@@ -317,10 +317,11 @@ test('Neu ansuchen löscht auch Uhrzeit und Würfel-Vermerk des alten Tickets', 
 // ── Export und täglicher Lauf ─────────────────────────────────────
 test('Edge Functions nutzen dieselben Regeln (Kopien aus js/ sind aktuell)', () => {
   const fs = require('node:fs'), path = require('node:path');
-  [['foerder-taeglich', 'ablauf.js'], ['oemag', 'ablauf.js'], ['oemag', 'oemag.js']].forEach(([fn, datei]) => {
+  [['supabase/functions/foerder-taeglich', 'ablauf.js'], ['supabase/functions/oemag', 'ablauf.js'], ['supabase/functions/oemag', 'oemag.js'],
+   ['web/lib/regeln', 'ablauf.js']].forEach(([ort, datei]) => {
     const original = fs.readFileSync(path.join(__dirname, '../js', datei), 'utf8');
-    const kopie = fs.readFileSync(path.join(__dirname, '../supabase/functions', fn, datei), 'utf8');
-    assert.equal(kopie, original, `Bitte js/${datei} nach supabase/functions/${fn}/ kopieren`);
+    const kopie = fs.readFileSync(path.join(__dirname, '..', ort, datei), 'utf8');
+    assert.equal(kopie, original, `Bitte js/${datei} nach ${ort}/ kopieren`);
   });
 });
 
