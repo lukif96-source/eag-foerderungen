@@ -57,6 +57,7 @@
     verlaengert_bis: 'Inbetriebnahme-Frist verlängert bis',
     frueher_abgelehnt: 'Früher abgelehnt im Call',
     frueher_abgelehnt_am: 'Früher abgelehnt am',
+    nochmal_ansuchen: 'Nochmal ansuchen (in der Excel orange)',
     ticket_uhrzeit: 'Ticket gezogen um',
     zieher_geplant: 'Ticket-Zieher laut Würfel'
   };
@@ -369,6 +370,8 @@
     const calls = (s.frueher_abgelehnt || '').split(',').map(x => x.trim()).filter(Boolean);
     const am = (s.frueher_abgelehnt_am || '').split(',').map(x => x.trim());
     const aus = calls.map((c, i) => ({ call: c, ergebnis: 'abgelehnt', datum: istDatum(am[i]) ? am[i] : null, aktuell: false }));
+    // In der Excel orange, früherer Call unbekannt
+    if (!calls.length && !leer(s.nochmal_ansuchen)) aus.push({ call: null, ergebnis: 'abgelehnt', datum: null, aktuell: false });
     const st = status(f, heute);
     const ergebnis = st.fertig ? 'ausgezahlt' : st.ende ? st.ende.key : 'laufend';
     const datum = st.fertig ? s.ausgezahlt : st.ende ? s[st.ende.key] : null;
@@ -390,6 +393,11 @@
   // ---------------------------------------------------------------
   // Prüfungen und Schätzungen
   // ---------------------------------------------------------------
+  // Fürs Ticket ohne „AT“ (31 Zeichen), im Antrag darf es davor stehen
+  function zpFuersTicket(zp) { return String(zp || '').replace(/\s/g, '').toUpperCase().replace(/^AT(?=\d{11}[0-9A-Z]{20}$)/, ''); }
+  // Wird „nochmal angesucht“? (früher abgelehnt oder in der Excel orange)
+  function nochmal(f) { const s = f.schritte || {}; return !leer(s.frueher_abgelehnt) || !leer(s.nochmal_ansuchen); }
+
   // Zählpunkt: AT + 6 Ziffern Netzbetreiber + 5 Ziffern PLZ + 20 Zeichen
   function zpPruefung(zp) {
     const z = String(zp || '').replace(/\s/g, '').toUpperCase();
@@ -492,7 +500,7 @@
 
   const API = {
     PHASEN, SCHRITTE, IDX, ENDE, NEBEN, CALLS, LETZTER_CALL, PFLICHT, FELDER, SAETZE_2026,
-    leer, istDatum, plusTage, plusMonate, heuteText, callEnde, fehlendeDaten, datenFehlen, antragDatenFehlen, ansuchen, imJahr, ANTRAG, schrittWert, status, aufgabe,
+    leer, istDatum, zpFuersTicket, nochmal, plusTage, plusMonate, heuteText, callEnde, fehlendeDaten, datenFehlen, antragDatenFehlen, ansuchen, imJahr, ANTRAG, schrittWert, status, aufgabe,
     inbetriebnahmeFrist, fristen, tracker, offenerCall, naechsterTicketTag, ticketTagPhase, ticketGezogen, gezogenVon, zieherVerteilen, neuAnsuchen, zpPruefung, kategorie, zuschuss,
     nameTokens, zpNorm, gleicherKunde, datumDE, exportZeile, csv, verpassteFristen
   };

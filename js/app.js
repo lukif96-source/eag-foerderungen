@@ -394,7 +394,7 @@
       knopf = `<button class="z-knopf leise" data-oeffnen>${esc(n.knopf)}</button>`;
     }
     const flags = [
-      s.frueher_abgelehnt ? `<span class="z-tag" title="Abgelehnt im Call ${esc(callsText(s.frueher_abgelehnt))}">${s.frueher_abgelehnt.split(',').length + 1}. Versuch · zuvor abgelehnt ${esc(callsText(s.frueher_abgelehnt))}</span>` : '',
+      E.nochmal(d) ? `<span class="z-tag z-nochmal" title="${s.frueher_abgelehnt ? 'Abgelehnt im Call ' + esc(callsText(s.frueher_abgelehnt)) : 'In der Excel orange markiert'}">Nochmal ansuchen${s.frueher_abgelehnt ? ' · abgelehnt ' + esc(callsText(s.frueher_abgelehnt)) : ''}</span>` : '',
       n && n.key === 'eingereicht' && E.antragDatenFehlen(d).length ? `<span class="z-icon gelb" title="Für den Antrag fehlen: ${esc(E.antragDatenFehlen(d).join(', '))}"><svg><use href="#i-alert"/></svg></span>` : '',
       (d.offene_punkte || '').trim() ? `<span class="z-icon gelb" title="${esc(d.offene_punkte)}"><svg><use href="#i-flag"/></svg></span>` : '',
       fehlt.length ? `<span class="z-icon rot" title="Es fehlen: ${esc(fehlt.join(', '))}"><svg><use href="#i-alert"/></svg></span>` : ''
@@ -471,7 +471,7 @@
   const gezogen = d => !!(d.schritte || {}).ticket;
   // Kopier-Felder in der Reihenfolge, in der sie im Portal gebraucht werden (Tasten 1–7)
   const KOPIER = [
-    ['Zählpunkt', d => String(d.zaehlpunkt || '').replace(/\s/g, '').toUpperCase().replace(/^(?!AT)(\d{11})/, 'AT$1')],
+    ['Zählpunkt ohne AT', d => E.zpFuersTicket(d.zaehlpunkt)],
     ['Kunde', d => d.kunde], ['Straße', d => d.strasse], ['PLZ', d => d.plz], ['Ort', d => d.ort],
     ['kWp', d => d.kwp === null || d.kwp === undefined || d.kwp === '' ? '' : zahlDE(d.kwp)],
     ['FPJ', d => d.fpj || d.projekt_nr]
@@ -489,7 +489,7 @@
       : bearbeiten && phase !== 'vorher' ? `${auswahl}<button class="erledigt" data-tk-gezogen><svg><use href="#i-check"/></svg>Gezogen</button>` : `<span class="tk-plan">${esc(wer || 'ohne Zieher')}</span>`;
     return `<div class="tk ${gezogen(d) ? 'tk-fertig' : ''}" data-id="${d.id}" tabindex="0">
       <div class="tk-kopf"><button class="tk-name" data-oeffnen-tk>${esc(d.kunde || '(ohne Namen)')}</button>
-        <span class="tk-meta">${esc([z ? 'Kat. ' + z.kat : '', d.kwp ? zahlDE(d.kwp) + ' kWp' : '', d.speicher || ''].filter(Boolean).join(' · '))}</span>
+        <span class="tk-meta">${esc([z ? 'Kat. ' + z.kat : '', d.kwp ? zahlDE(d.kwp) + ' kWp' : '', d.speicher || ''].filter(Boolean).join(' · '))}</span>${E.nochmal(d) ? '<span class="z-tag z-nochmal">Nochmal ansuchen</span>' : ''}${E.zpPruefung(d.zaehlpunkt) === 'fehlt' ? '<span class="tk-warn">Zählpunkt fehlt – ohne gibt es kein Ticket</span>' : E.zpPruefung(d.zaehlpunkt) === 'ungueltig' ? '<span class="tk-warn">Zählpunkt prüfen (31 Zeichen)</span>' : ''}
         <span class="tk-stand">${stand}</span></div>
       <div class="tk-kopien">${KOPIER.map(([l, f], i) => { const v = f(d); return `<button class="tk-kopie" data-kopie="${i}" ${v ? '' : 'disabled'} title="${esc(v || 'fehlt')} – Taste ${i + 1}"><kbd>${i + 1}</kbd>${esc(l)}</button>`; }).join('')}</div>
     </div>`;
@@ -705,7 +705,8 @@
     }
     if (k === 'zaehlpunkt') {
       const p = E.zpPruefung(rec.zaehlpunkt);
-      return p === 'ohneAT' ? '31 Stellen ohne „AT“ – im EAG-Portal mit AT davor eintragen'
+      return p === 'ohneAT' ? 'Ohne „AT“ – so fürs Ticket richtig; beim Antrag im Portal mit AT'
+        : p === 'ok' ? 'Fürs Ticket ohne „AT“ eingeben – der Kopier-Knopf am Ticket-Tag lässt es weg'
         : p === 'ungueltig' ? '<b class="rot">Format prüfen: AT + 31 Zeichen</b>' : '';
     }
     if (k === 'kwp' && (rec.programm || 'EAG') === 'EAG') {
@@ -1389,8 +1390,17 @@ Vortag: ${esc(a.vorher_sha256 || '–')}">${esc(kurzHash(a.sha256))}</td>
         <div><b>${ab.gleich.length}</b><span>schon aktuell</span></div>
         <div><b>${a.doppelt}</b><span>Doppelte zusammengeführt</span></div>
       </div>
-      ${(() => { const n = ab.neu.filter(f => f._abgelehntIm).length + ab.ergaenzen.filter(e => e.neuAngesucht).length; const c = E.offenerCall(heute());
-        return n ? `<div class="imp-hinweise"><b><svg><use href="#i-restore"/></svg>${n} in der Liste orange markiert (abgelehnt)</b><ul><li>${c ? `Werden in den Call ${esc(datumDE(c))} übernommen: Ticket und Einreichung zurückgesetzt, Portal-Projekt bleibt.` : 'Kein Call mehr offen – sie werden als abgelehnt gespeichert.'}</li></ul></div>` : ''; })()}
+      ${(() => {
+        // Orange in der Excel = nochmal ansuchen. Alle erkannten Zeilen namentlich, damit man es gegenprüfen kann.
+        const orange = a.eintraege.filter(f => f._orange);
+        if (!orange.length) return '';
+        const umstellen = ab.neu.filter(f => f._orange).length + ab.ergaenzen.filter(e => e.neuAngesucht).length;
+        const c = E.offenerCall(heute());
+        return `<div class="imp-hinweise"><b><svg><use href="#i-restore"/></svg>${orange.length} Zeilen orange markiert → „Nochmal ansuchen“</b><ul>
+          <li>${c ? `${umstellen} kommen in den Call ${esc(datumDE(c))} (Ticket und Einreichung zurück, Portal-Projekt bleibt) und stehen als „Nochmal ansuchen“ in der Liste.${orange.length > umstellen ? ` ${orange.length - umstellen} sind schon so vermerkt.` : ''}` : 'Kein Call mehr offen – sie werden als abgelehnt gespeichert.'}</li>
+          <li>Erkannt wird jeder Orangeton – an der Kunden-Zelle oder an der halben Zeile. Fehlt hier jemand oder ist jemand zu viel: bitte melden.</li>
+          <li class="grau">${orange.map(f => esc(f.kunde)).join(' · ')}</li></ul></div>`;
+      })()}
       ${a.hinweise.length ? `<div class="imp-hinweise"><b><svg><use href="#i-alert"/></svg>Bitte nach dem Import prüfen (${a.hinweise.length})</b><ul>${a.hinweise.map(h => `<li>${esc(h)}</li>`).join('')}</ul></div>` : ''}
       <details class="imp-vorschau"><summary>Vorschau der neuen Einträge</summary>
         <table class="mini-tabelle"><thead><tr><th>Kunde</th><th>Jahr</th><th>Call</th><th>Zieher</th><th>Stand</th><th>aus</th></tr></thead><tbody>

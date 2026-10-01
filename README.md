@@ -57,13 +57,17 @@ solange der Call nicht vorbei ist.
 **Ticket-Tag** (8.10.2026, ab 17:00): Bis einschließlich dem Tag danach (9.10.) steht oben unter „Zu tun“ eine Karte.
 Vorher: Namen der Ticket-Zieher eintragen (mit Komma) und Enter → wer noch keinen Zieher hat, wird zufällig und
 gleichmäßig zugewürfelt; fällt ein Name weg, werden seine Tickets neu verteilt. Am Calltag und am Tag danach zeigt die
-Karte jedes Ticket mit Kopier-Knöpfen in Portal-Reihenfolge (Tasten 1–7: Zählpunkt, Kunde, Straße, PLZ, Ort, kWp, FPJ)
+Karte jedes Ticket mit Kopier-Knöpfen in Portal-Reihenfolge (Tasten 1–7: Zählpunkt **ohne „AT“** – so will es das
+Portal beim Ticket; beim Antrag darf AT davorstehen –, Kunde, Straße, PLZ, Ort, kWp, FPJ)
 und „Gezogen“: gespeichert werden Datum, Uhrzeit (am Calltag) und **wer wirklich gezogen hat**. Zieht jemand anderer,
 vorher den Namen umstellen – der Zieher wird zu dieser Person, die gewürfelte Zuteilung bleibt als „gewürfelt war …“
 in der Akte. Am 9.10. heißt die Karte „heute eintragen, wer gezogen hat“; ab 10.10. ist sie weg.
 
-Excel-Import: orange-rot markierte Zeilen (abgelehnt) kommen direkt in den offenen Call;
-schon importierte Einträge werden beim erneuten Import einmalig umgestellt.
+Excel-Import: **orange markierte Zeilen = „Nochmal ansuchen“** – jeder Orangeton (Orange-Rot bis Excel-„Orange“,
+auch helle Töne; nicht Gelb/Grün), an der Kunden-Zelle oder an mindestens der halben Zeile, auch ohne Call-Datum.
+Sie kommen in den offenen Call (Ticket/Einreichung zurück, Portal-Projekt bleibt) und tragen in Liste und
+Ticket-Karte die Marke „Nochmal ansuchen“. Der Import-Dialog zählt sie und nennt alle Namen zum Gegenprüfen.
+Schon importierte Einträge werden beim erneuten Import einmalig umgestellt.
 
 ## Bedienung
 Design wie im Messtool (`pro.css`): neutrale Grautöne, Farbe nur für Bedeutung (Grün erledigt, Bernstein bald,

@@ -687,3 +687,5 @@ body.demo .kopf::after { content: "Demo – keine echten Daten"; position: absol
 .a-abgelehnt .ansuchen-nr { border-color: var(--krit-line); color: var(--krit); }
 .a-ausgezahlt b { color: var(--ok); }
 .a-laufend b { color: var(--ink); }
+.z-nochmal { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); font-weight: 500; }
+.tk-warn { font-size: 12px; font-weight: 500; color: var(--krit); }
