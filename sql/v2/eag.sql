@@ -394,13 +394,13 @@ begin
   -- Antragsdaten (Hinweis bis zum Einreichen)
   antrag_daten_fehlen := array[]::text[];
   if not (s ? 'eingereicht' or s ? 'ausgezahlt' or s ? 'abgelehnt' or s ? 'zurueckgezogen' or s ? 'erloschen') then
-    if btrim(p.strasse) = '' then antrag_daten_fehlen := antrag_daten_fehlen || 'Straße'; end if;
-    if btrim(p.plz) = '' then antrag_daten_fehlen := antrag_daten_fehlen || 'PLZ'; end if;
-    if btrim(p.ort) = '' then antrag_daten_fehlen := antrag_daten_fehlen || 'Ort'; end if;
-    if btrim(k.mail) = '' then antrag_daten_fehlen := antrag_daten_fehlen || 'Mail'; end if;
+    if btrim(p.strasse) = '' then antrag_daten_fehlen := array_append(antrag_daten_fehlen, 'Straße'::text); end if;
+    if btrim(p.plz) = '' then antrag_daten_fehlen := array_append(antrag_daten_fehlen, 'PLZ'::text); end if;
+    if btrim(p.ort) = '' then antrag_daten_fehlen := array_append(antrag_daten_fehlen, 'Ort'::text); end if;
+    if btrim(k.mail) = '' then antrag_daten_fehlen := array_append(antrag_daten_fehlen, 'Mail'::text); end if;
     if a.art = 'speicher' then
-      if btrim(p.speicher) = '' then antrag_daten_fehlen := antrag_daten_fehlen || 'Speicher'; end if;
-    elsif p.kwp is null then antrag_daten_fehlen := antrag_daten_fehlen || 'kWp'; end if;
+      if btrim(p.speicher) = '' then antrag_daten_fehlen := array_append(antrag_daten_fehlen, 'Speicher'::text); end if;
+    elsif p.kwp is null then antrag_daten_fehlen := array_append(antrag_daten_fehlen, 'kWp'::text); end if;
   end if;
 
   -- Ausgezahlt schlägt alles
@@ -421,8 +421,8 @@ begin
      and not (s ?| array['ticket', 'eingereicht', 'vertrag_erhalten', 'vertrag_versendet', 'inbetriebnahme',
                          'herkunftsnachweis', 'rechnung', 'zahlung', 'abgeschlossen'])
      and (a.call_start is null or eag.call_ende(a.call_start) >= p_heute) then
-    if btrim(coalesce(k.name, '')) = '' then daten_fehlen := daten_fehlen || 'Kunde'; end if;
-    if btrim(p.zaehlpunkt) = '' then daten_fehlen := daten_fehlen || 'Zählpunkt'; end if;
+    if btrim(coalesce(k.name, '')) = '' then daten_fehlen := array_append(daten_fehlen, 'Kunde'::text); end if;
+    if btrim(p.zaehlpunkt) = '' then daten_fehlen := array_append(daten_fehlen, 'Zählpunkt'::text); end if;
   end if;
 
   erledigt := array[]::boolean[];
@@ -516,6 +516,24 @@ end $$;
 -- ---------------------------------------------------------------
 -- 6. Schreiben über Funktionen – mit Zustandsprüfung
 -- ---------------------------------------------------------------
+-- Solange die bestehende App läuft: Was hier gesetzt wird, auch in public.foerderungen eintragen,
+-- sonst würde der Spiegel es beim nächsten Speichern in der App wieder entfernen.
+-- Nur für den aktuellen Antrag der Förderung (gleicher Call, höchster Versuch). Der Spiegel sieht danach
+-- keinen Unterschied mehr und schreibt nichts doppelt.
+create or replace function eag.legacy_zurueck(p_antrag uuid, p_schritt eag.schritt, p_setzen boolean, p_datum date)
+returns void language plpgsql security definer set search_path = '' as $$
+declare a eag.antrag; lid uuid;
+begin
+  select * into a from eag.antrag where id = p_antrag;
+  select legacy_id into lid from eag.projekt where id = a.projekt_id;
+  if lid is null then return; end if;
+  if exists (select 1 from eag.antrag b where b.projekt_id = a.projekt_id and b.versuch > a.versuch) then return; end if;
+  update public.foerderungen f
+     set schritte = case when p_setzen then f.schritte || jsonb_build_object(p_schritt::text, coalesce(p_datum::text, '✓'))
+                         else f.schritte - p_schritt::text end
+   where f.id = lid and f.foerdercall is not distinct from a.call_start;
+end $$;
+
 create or replace function eag.schritt_setzen(p_antrag uuid, p_schritt eag.schritt, p_datum date default current_date)
 returns void language plpgsql security definer set search_path = '' as $$
 declare
@@ -556,6 +574,7 @@ begin
   select a.projekt_id, p_antrag, 'schritt_gesetzt', p_schritt,
          (select jsonb_build_object('datum', y.datum) from eag.antrag_schritt y where y.antrag_id = p_antrag and y.schritt = p_schritt),
          jsonb_build_object('datum', p_datum);
+  perform eag.legacy_zurueck(p_antrag, p_schritt, true, p_datum);
 end $$;
 
 create or replace function eag.schritt_entfernen(p_antrag uuid, p_schritt eag.schritt)
@@ -571,6 +590,7 @@ begin
   insert into eag.ereignis (projekt_id, antrag_id, art, schritt, alt)
   select a.projekt_id, p_antrag, 'schritt_entfernt', p_schritt, jsonb_build_object('datum', y.datum)
   from eag.antrag_schritt y where y.antrag_id = p_antrag and y.schritt = p_schritt;
+  perform eag.legacy_zurueck(p_antrag, p_schritt, false, null);
 end $$;
 
 -- Abgelehnt → neuer Antrag (Versuch + 1) im offenen Call; der alte bleibt unverändert stehen
@@ -591,6 +611,22 @@ begin
   returning id into neu;
   insert into eag.ereignis (projekt_id, antrag_id, art, alt, neu)
   values (a.projekt_id, neu, 'neu_angesucht', jsonb_build_object('antrag', p_antrag, 'call', a.call_start), jsonb_build_object('call', call));
+  -- Bestehende App wie neuAnsuchen() in js/ablauf.js umstellen (Call, Jahr, Verlauf der Ablehnungen)
+  update public.foerderungen f set
+    foerdercall = call, jahr = extract(year from call)::int, ticket = '',
+    schritte = (f.schritte - array['ticket', 'ticket_uhrzeit', 'zieher_geplant', 'eingereicht', 'abgelehnt', 'nachforderung', 'nachgereicht'])
+      || jsonb_build_object('frueher_abgelehnt', concat_ws(', ', nullif(btrim(f.schritte ->> 'frueher_abgelehnt'), ''), a.call_start::text))
+      || case when (select y.datum from eag.antrag_schritt y where y.antrag_id = p_antrag and y.schritt = 'abgelehnt') is not null
+              or nullif(btrim(f.schritte ->> 'frueher_abgelehnt_am'), '') is not null
+         then jsonb_build_object('frueher_abgelehnt_am', concat_ws(', ',
+                nullif(rpad(coalesce(f.schritte ->> 'frueher_abgelehnt_am', ''), 0), ''),
+                (select string_agg(coalesce(nullif(btrim(x), ''), ''), ', ') from unnest(
+                   (string_to_array(coalesce(f.schritte ->> 'frueher_abgelehnt_am', ''), ','))
+                   [1:coalesce(cardinality(string_to_array(nullif(btrim(f.schritte ->> 'frueher_abgelehnt'), ''), ',')), 0)]) x),
+                coalesce((select y.datum::text from eag.antrag_schritt y where y.antrag_id = p_antrag and y.schritt = 'abgelehnt'), '')))
+         else '{}'::jsonb end
+  from eag.projekt pr
+  where pr.id = a.projekt_id and f.id = pr.legacy_id and f.foerdercall is not distinct from a.call_start;
   -- Das Portal-Projekt bleibt bestehen
   if exists (select 1 from eag.antrag_schritt where antrag_id = p_antrag and schritt = 'projekt') then
     insert into eag.ereignis (projekt_id, antrag_id, art, schritt, neu)
@@ -890,6 +926,7 @@ create policy lesen on eag.messtool_stand for select to authenticated
 create policy lesen on eag.sync_fehler for select to authenticated using (public.foerder_rolle() = 'admin');
 
 revoke execute on all functions in schema eag from public, anon;
+revoke execute on function eag.legacy_zurueck(uuid, eag.schritt, boolean, date) from authenticated;
 grant execute on function eag.schritt_setzen(uuid, eag.schritt, date), eag.schritt_entfernen(uuid, eag.schritt),
   eag.neu_ansuchen(uuid), eag.kette_pruefen(uuid), eag.stand(uuid, date), eag.fristen(uuid, date),
   eag.call_ende(date), eag.plus_monate(date, int), eag.frist_stufe(int), eag.offener_call(date), eag.schritt_nr(eag.schritt),

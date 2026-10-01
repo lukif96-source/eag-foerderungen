@@ -41,10 +41,27 @@ Ab dann läuft alles jede Nacht um 02:15 (Sommerzeit 03:15).
 *SQL Editor* → Inhalt von [`sql/vorschlag-revision.sql`](../sql/vorschlag-revision.sql) → **Run**.
 Danach protokolliert die nächtliche Funktion auch überfällige Fristen.
 
+### C. Datenmodell v2 (Schema `eag`) – läuft neben der App, ändert nichts an ihr
+
+1. *SQL Editor* → Inhalt von [`sql/v2/eag.sql`](../sql/v2/eag.sql) → **Run**.
+2. Einmal übernehmen: `select * from eag.migrieren();` → „übernommen“ = Anzahl der Förderungen, „fehler“ = 0.
+   Ab dann spiegelt ein Trigger jede Änderung sofort. Fehler beim Spiegeln stehen in `eag.sync_fehler` und
+   **brechen das Speichern in der App nie ab**.
+3. Für das neue Dashboard: *Project Settings* → *API* → **Exposed schemas** → `eag` hinzufügen.
+4. Neue Rolle **„vertrieb“** (Nutzer & Rollen): sieht nur Kunden, bei denen er als Mitarbeiter eingetragen ist.
+
+Was v2 abbildet: Kunde → Projekt (Anlage, Brücke zum Messtool über die Projektnummer) → Antrag (je Call ein
+Versuch; Neu ansuchen = neuer Antrag mit Vorgänger) → Schritte aus unveränderlichen Ereignissen (SHA-256-Kette),
+Belege, Fristen. Der Status wird berechnet (Enum `eag.status`), nie gespeichert; Schreiben über
+`eag.schritt_setzen` prüft die Reihenfolge (Ticket nur am Calltag, Einreichen nur im Call, keine Lücken …).
+Die Fristen in SQL sind dieselben wie in `js/ablauf.js` – `tests/sql/paritaet.js` vergleicht beide bei jedem Push.
+
 ### Prüfen
 
 ```sql
 select tag, anzahl, left(sha256, 12), datei, versendet_am from public.foerder_archiv order by tag desc;
 select jobname, schedule, active from cron.job;
 select status, return_message, start_time from cron.job_run_details order by start_time desc limit 5;
+select * from eag.sync_fehler order by id desc limit 10;               -- v2: sollte leer sein
+select status, count(*) from eag.antrag_stand group by 1 order by 2 desc;
 ```
