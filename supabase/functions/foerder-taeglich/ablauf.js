@@ -307,7 +307,8 @@
     const s = Object.assign({}, f.schritte || {});
     const geplant = String(f.zieher || '').trim();
     von = String(von || '').trim() || geplant;
-    s.ticket = istDatum(s.ticket) ? s.ticket : datum;
+    // Tickets gibt es nur am Calltag: Wer später nachträgt (z. B. am 09.10.), trägt trotzdem den Calltag ein
+    s.ticket = istDatum(s.ticket) ? s.ticket : (istDatum(f.foerdercall) && datum >= f.foerdercall ? f.foerdercall : datum);
     if (uhrzeit && /^\d{2}:\d{2}(:\d{2})?$/.test(uhrzeit)) s.ticket_uhrzeit = uhrzeit;
     if (geplant && von !== geplant && !s.zieher_geplant) s.zieher_geplant = geplant;
     if (s.zieher_geplant === von) delete s.zieher_geplant;

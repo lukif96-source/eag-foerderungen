@@ -899,7 +899,7 @@
     if (el.dataset.schritt) {
       const key = el.dataset.schritt;
       const s = Object.assign({}, rec.schritte);
-      if (el.checked) s[key] = heute(); else delete s[key];
+      if (el.checked) s[key] = key === 'ticket' && E.istDatum(rec.foerdercall) && heute() >= rec.foerdercall ? rec.foerdercall : heute(); else delete s[key];
       if (key === 'ticket') { if (el.checked && ticketUhrzeit(rec)) s.ticket_uhrzeit = uhrJetzt(); else if (!el.checked) delete s.ticket_uhrzeit; }
       rec.schritte = s;
       ablaufNeu();

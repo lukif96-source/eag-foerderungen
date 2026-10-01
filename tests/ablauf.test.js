@@ -384,3 +384,11 @@ test('Jahresansicht zeigt abgelehnte aus Vorjahren, solange noch angesucht werde
   assert.equal(A.imJahr(umgezogen, '2026', '2026-10-01'), true);
   assert.equal(A.imJahr(basis({}, { jahr: 2025, foerdercall: '2025-06-16' }), '2026', '2026-10-01'), false);
 });
+
+test('Ticket am Tag danach nachgetragen: Datum ist trotzdem der Calltag', () => {
+  const p = A.ticketGezogen(basis({ projekt: '✓' }), 'Bianca', '2026-10-09', '');
+  assert.equal(p.schritte.ticket, '2026-10-08');
+  assert.equal(p.schritte.ticket_uhrzeit, undefined);
+  // ohne bekannten Call: das übergebene Datum
+  assert.equal(A.ticketGezogen(basis({ projekt: '✓' }, { foerdercall: '' }), 'Bianca', '2026-10-09', '').schritte.ticket, '2026-10-09');
+});
