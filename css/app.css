@@ -371,6 +371,9 @@ body.demo .kopf::after { content: "Demo – keine echten Daten"; position: absol
 @keyframes einblenden { from { opacity: 0; } }
 .panel { width: min(1100px, 100%); height: 100%; background: var(--bg); display: flex; flex-direction: column; box-shadow: var(--sh-3); border-left: 1px solid var(--line); animation: rein .2s cubic-bezier(.2, .8, .2, 1); }
 @keyframes rein { from { transform: translateX(28px); opacity: .5; } }
+/* Neue Förderung: Vollbild, Inhalt mittig auf Lesebreite */
+#detail.voll .panel { width: 100%; border-left: 0; animation: auf .16s ease-out; }
+#detail.voll :is(.panel-kopf, .panel-inhalt, .panel-fuss) { padding-inline: max(20px, calc((100% - 1180px) / 2)); }
 #dialog, .overlay-frage { justify-content: center; align-items: center; padding: 16px; }
 .panel-mittel { width: min(760px, 100%); height: auto; max-height: 100%; border-radius: 14px; border: 1px solid var(--line); overflow: hidden; animation: auf .16s ease-out; }
 .panel-klein { width: min(420px, 100%); height: auto; border-radius: 14px; border: 1px solid var(--line); overflow: hidden; animation: auf .16s ease-out; }

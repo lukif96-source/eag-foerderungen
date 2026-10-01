@@ -676,6 +676,8 @@
     rec.schritte = rec.schritte || {};
     S.detail = { rec, orig: JSON.parse(JSON.stringify(rec)), neu: !d };
     zeichneDetail();
+    // Neue Förderung im Vollbild: noch kein Bezug zur Liste, dafür alle Felder fürs Portal
+    $('#detail').classList.toggle('voll', !d);
     $('#detail').hidden = false;
     document.body.classList.add('modal-offen');
     if (!d) setTimeout(() => { const k = $('#d-inhalt [name="kunde"]'); k && k.focus(); }, 50);
